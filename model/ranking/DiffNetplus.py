@@ -46,9 +46,6 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
 
     def trainModel(self):
         self.weights = {}
-        self.item_train_num = 100
-        self.user_train_num = 100
-          
         initializer = tf.contrib.layers.xavier_initializer()
         self.weights['user_fusion_weights'] = tf.Variable(
             initializer([self.emb_size, self.emb_size]), name='user_fusion_weights')
@@ -81,10 +78,9 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             #Item diffusion
             i=1
             new_item_embeddings = tf.identity(all_item_embeddings[k])
-            self.itemSegment = tf.placeholder(tf.int32,shape=())
-            for offset in range(self.item_train_num):
-                item_index = self.itemSegment + offset
-                item = self.data.id2item[self.itemSegment]
+            
+            for item in self.data.trainSet_i.keys():
+                item_index = self.data.item[item]
                 item_embedding = tf.gather(all_item_embeddings[k], item_index)
                 buyers_index = []
                 for user in self.data.trainSet_i[item].keys():
@@ -99,16 +95,15 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
                 new_item_embedding =  tf.matmul(eta,buyers_embedding)
                 tmp = tf.concat([new_item_embeddings[:item_index], new_item_embedding], 0)
                 new_item_embeddings = tf.concat([tmp, new_item_embeddings[item_index+1:]], 0)
-                print("Finished MLP 1: %d/%d/Layer %d" %(i,self.item_train_num,k+1))
+                print("Finished MLP 1: %d/%d/Layer %d" %(i,len(self.data.trainSet_i),k+1))
                 i+=1
             
             #User diffusion
             i=1
             new_user_embeddings = tf.identity(all_user_embeddings[k])
-            self.userSegment = tf.placeholder(tf.int32)
-            for offset in range(self.user_train_num):
-                user_index = self.userSegment + offset
-                user = self.data.id2user[user_index]
+            
+            for user in self.social.followees.keys():
+                user_index = self.data.user[user]
                 user_embedding = tf.gather(all_user_embeddings[k], user_index)
                 
                 #User neighbor
@@ -150,7 +145,7 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
                 tmp = tf.concat([new_user_embeddings[:user_index], new_user_embedding], 0)                
                 new_user_embeddings = tf.concat([tmp, new_user_embeddings[user_index+1:]], 0) 
                 
-                print("Finished MLP 2,3,4: %d/%d/Layer %d" %(i,self.user_train_num,k+1))
+                print("Finished MLP 2,3,4: %d/%d/Layer %d" %(i,len(self.social.followees),k+1))
                 i+=1
             
             all_item_embeddings.append(new_item_embeddings)
@@ -167,7 +162,7 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         self.u_embedding = tf.nn.embedding_lookup(user_embeddings, self.u_idx)
         self.v_embedding = tf.nn.embedding_lookup(item_embeddings, self.v_idx)
         self.test = tf.reduce_sum(tf.multiply(self.u_embedding, item_embeddings), 1)
-        
+
         y = tf.reduce_sum(tf.multiply(self.u_embedding, self.v_embedding), 1) \
             - tf.reduce_sum(tf.multiply(self.u_embedding, self.neg_item_embedding), 1)
         loss = -tf.reduce_sum(tf.log(tf.sigmoid(y))) + self.regU * (
@@ -180,8 +175,6 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch
-                self.itemSegment = np.random.randint(0, self.num_items)
-                self.userSegment = np.random.randint(0, self.num_users)
                 _, l = self.sess.run([train, loss],
                                      feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
