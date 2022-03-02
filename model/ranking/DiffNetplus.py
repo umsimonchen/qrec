@@ -78,30 +78,33 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             #Item diffusion
             i=1
             new_item_embeddings = tf.identity(all_item_embeddings[k])
+            self.item_train_num = 100
+            self.buyer_len = tf.placeholder(tf.int32, shape=[self.item_train_num])
+            self.item_index = tf.placeholder(tf.int32, shape=[self.item_train_num])
+            self.item_buyer = tf.placeholder(tf.int32, shape=[self.item_train_num, None])
             
-            for item in self.data.trainSet_i.keys():
-                item_index = self.data.item[item]
-                item_embedding = tf.gather(all_item_embeddings[k], item_index)
-                buyers_index = []
-                for user in self.data.trainSet_i[item].keys():
-                    buyers_index.append(self.data.user[user])
-                buyers_embedding = tf.gather(all_user_embeddings[k], buyers_index)
-                vu_ego_embedding = tf.concat([[item_embedding]*len(self.data.trainSet_i[item]), buyers_embedding], 1)
+            for num in range(self.item_train_num):
+                item_embedding = tf.gather(all_item_embeddings[k], self.item_index[num])
+                item_embedding = tf.reshape(item_embedding, [1, self.emb_size])
+                print(tf.shape(item_embedding))
+                buyers_embedding = tf.gather(all_user_embeddings[k], self.item_buyer[num])
+                item_embedding = tf.tile(item_embedding, [self.buyer_len[num],1])
+                vu_ego_embedding = tf.concat([item_embedding, buyers_embedding], 1)
                 vu_ego_embedding = tf.matmul(vu_ego_embedding,self.weights['mlp_one_in_weights%d' % k])
                 vu_ego_embedding = tf.matmul(vu_ego_embedding,self.weights['mlp_one_out_weights%d' % k])
                 vu_ego_embedding = tf.nn.relu(vu_ego_embedding)
-                eta = tf.nn.softmax(tf.reshape(vu_ego_embedding, [1, len(self.data.trainSet_i[item])]))
+                eta = tf.nn.softmax(tf.reshape(vu_ego_embedding, [1, self.buyer_len[num]]))
                 
                 new_item_embedding =  tf.matmul(eta,buyers_embedding)
-                tmp = tf.concat([new_item_embeddings[:item_index], new_item_embedding], 0)
-                new_item_embeddings = tf.concat([tmp, new_item_embeddings[item_index+1:]], 0)
-                print("Finished MLP 1: %d/%d/Layer %d" %(i,len(self.data.trainSet_i),k+1))
+                tmp = tf.concat([new_item_embeddings[:self.item_index[num]], new_item_embedding], 0)
+                new_item_embeddings = tf.concat([tmp, new_item_embeddings[self.item_index[num]+1:]], 0)
+                print("Finished MLP 1: %d/%d/Layer %d" %(i,self.item_train_num,k+1))
                 i+=1
             
             #User diffusion
             i=1
             new_user_embeddings = tf.identity(all_user_embeddings[k])
-            
+            '''
             for user in self.social.followees.keys():
                 user_index = self.data.user[user]
                 user_embedding = tf.gather(all_user_embeddings[k], user_index)
@@ -147,7 +150,7 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
                 
                 print("Finished MLP 2,3,4: %d/%d/Layer %d" %(i,len(self.social.followees),k+1))
                 i+=1
-            
+            '''
             all_item_embeddings.append(new_item_embeddings)
             all_user_embeddings.append(new_user_embeddings)
         
@@ -175,8 +178,20 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch
+                item_index = np.random.randint(0, self.num_items, size=self.item_train_num)
+                item_buyer = []
+                buyer_len = []
+                for i in item_index:
+                    buyers_index = []
+                    l = 0
+                    for user in self.data.trainSet_i[self.data.id2item[i]].keys():
+                        buyers_index.append(self.data.user[user])
+                        l += 1
+                    item_buyer.append(buyers_index)
+                    buyer_len.append(l)
                 _, l = self.sess.run([train, loss],
-                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx})
+                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, \
+                                                self.item_index: item_index, self.item_buyer: item_buyer, self.buyer_len: buyer_len})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
 
     def predictForRanking(self, u):
