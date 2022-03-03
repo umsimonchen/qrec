@@ -90,7 +90,7 @@ class ESRF(SocialRecommender,GraphRecommender):
         indices = np.mat([adjacency.row, adjacency.col]).transpose() #return m*2 matrix recording the user-user indices
         #print(adjacency.row,adjacency.col,indices)
         self.A = tf.SparseTensor(indices, adjacency.data.astype(np.float32), adjacency.shape)
-        print(self.A)
+        #print(self.A)
         self.adjacency = adjacency.tocsr()
         
         #Motif GCN
