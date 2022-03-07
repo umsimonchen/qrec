@@ -43,7 +43,7 @@ class DiffNet(SocialRecommender,GraphRecommender):
                 initializer([2 * self.emb_size, self.emb_size]), name='weights%d' % k)
 
         user_embeddings = self.user_embeddings
-        #print(self.data.id2item)
+        print(tf.shape(user_embeddings))
         for k in range(self.n_layers):
             new_user_embeddings = tf.sparse_tensor_dense_matmul(self.S,user_embeddings) #m*d
             user_embeddings = tf.matmul(tf.concat([new_user_embeddings,user_embeddings],1),self.weights['weights%d' % k]) #m*2d 2d*d = m*d
@@ -69,9 +69,9 @@ class DiffNet(SocialRecommender,GraphRecommender):
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch
-                _, l = self.sess.run([train, loss],
+                _, l, u = self.sess.run([train, loss, user_embeddings],
                                      feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx})
-                print('training:', epoch + 1, 'batch', n, 'loss:', l)
+                print('training:', epoch + 1, 'batch', n, 'loss:', l, "ue:", u)
 
     def predictForRanking(self, u):
         'invoked to rank all the items for the user'

@@ -13,8 +13,8 @@ import numpy as np
 import os
 from util import config
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 tf.reset_default_graph()
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 #For general comparison. We do not include the user/item features extracted from text/images
 
 class DiffNetplus(SocialRecommender,GraphRecommender):
@@ -76,16 +76,22 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             initializer([self.emb_size, self.emb_size]), name='item_fusion_weights')      
         user_embeddings = tf.matmul(self.user_embeddings,self.weights['user_fusion_weights']) #m*d
         item_embeddings = tf.matmul(self.item_embeddings,self.weights['item_fusion_weights']) #m*d
-        all_user_embeddings = [user_embeddings]
-        all_item_embeddings = [item_embeddings]
-        
+        all_user_embeddings = [user_embeddings] * 3
+        all_item_embeddings = [item_embeddings] * 3
+            
         #item diffusion tensor initialization
-        self.item_index = tf.placeholder(tf.int32, shape=[], name="item_index")
-        self.buyers_length = tf.placeholder(tf.int32, shape=[], name="buyers_length")
-        self.buyers = tf.placeholder(tf.int32, shape=[None,], name="buyers")
-                
+        self.item_index = tf.placeholder(tf.int32, name="item_index")
+        
+        buyer_table = []
+        for key in self.data.trainSet_i.keys():
+            tmp = [0] * self.num_users
+            for value in self.data.trainSet_i[key].keys():
+                tmp[self.data.user[value]] = 1
+            buyer_table.append(tmp)
+        buyer_table = tf.constant(buyer_table)
+        
         #user diffusion tensor initialization
-        self.user_index = tf.placeholder(tf.int32, shape=[], name="user_index")
+        #self.user_index = tf.placeholder(tf.int32, shape=[], name="user_index")
         
         
         #Layers
@@ -107,26 +113,26 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             self.weights['mlp_four_out_weights%d' % k] = tf.Variable(
                 initializer([2 * self.emb_size, 1]), name='mlp_four_out_weights%d' % k)
 
-            #Item diffusion
-            i=1       
+            #Item diffusion      
             new_item_embeddings = tf.identity(all_item_embeddings[k])
-            item_embedding = tf.reshape(tf.nn.embedding_lookup(all_item_embeddings[k], self.item_index), [1, self.emb_size])
             
-            buyers_embedding = tf.nn.embedding_lookup(all_user_embeddings[k], self.buyers)
-            vu_ego_embedding = tf.concat([tf.tile(item_embedding, [self.buyers_length,1]), buyers_embedding], 1)
+            item_index = self.item_index
+            i_embedding = tf.reshape(tf.nn.embedding_lookup(all_item_embeddings[k], self.item_index), [1, self.emb_size])
+            buyer = tf.reduce_sum(tf.gather(buyer_table, item_index),0)
+            i_embedding = [tf.reduce_sum(i_embedding,0)] * self.num_users
+            vu_ego_embedding = tf.concat([i_embedding, all_user_embeddings[k]], 1)
             vu_ego_embedding = tf.matmul(vu_ego_embedding,self.weights['mlp_one_in_weights%d' % k])
             vu_ego_embedding = tf.matmul(vu_ego_embedding,self.weights['mlp_one_out_weights%d' % k])
-            #buyers_embedding = tf.nn.embedding_lookup(vu_ego_embedding, self.buyers)
+            condition = tf.reduce_sum(tf.transpose(tf.where(buyer==1)),0)
+            buyers_embedding = tf.gather(all_user_embeddings[k], condition)
+            vu_ego_embedding = tf.gather(vu_ego_embedding, condition)
             vu_ego_embedding = tf.nn.relu(vu_ego_embedding)
             eta = tf.nn.softmax(tf.transpose(vu_ego_embedding))
+            new_item_embedding = tf.matmul(eta,buyers_embedding)
             
-            print(self.num_items)
-            new_item_embedding =  tf.matmul(eta,buyers_embedding)
-            tmp = tf.concat([new_item_embeddings[:self.item_index], new_item_embedding], 0)
-            new_item_embeddings = tf.concat([tmp, new_item_embeddings[self.item_index+1:]], 0)
-            print("Finished MLP 1: %d/%d/Layer %d" %(i+1,100,k+1))
-            #i+=1
-            
+            new_item_embeddings = tf.concat([new_item_embeddings[:item_index], new_item_embedding, new_item_embeddings[item_index+1:]], 0)
+            print(tf.shape(new_item_embeddings))
+
             #User diffusion
             i=1
             new_user_embeddings = tf.identity(all_user_embeddings[k])
@@ -177,11 +183,12 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             '''
             all_item_embeddings.append(new_item_embeddings)
             all_user_embeddings.append(new_user_embeddings)
-        
+            
         #Organization
-        for k in range(1,self.n_layers):
-            user_embeddings = tf.concat([user_embeddings, all_user_embeddings[k]], 1)
-            item_embeddings = tf.concat([item_embeddings, all_item_embeddings[k]], 1)
+        for j in range(1,self.n_layers):
+            user_embeddings = tf.concat([all_user_embeddings[j], user_embeddings], 1)
+            item_embeddings = tf.concat([all_item_embeddings[j], item_embeddings], 1)
+        print('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',len(all_item_embeddings))
             
         #Prediction
         self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
@@ -202,19 +209,19 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch               
-                for i in range(100):
-                    itemSegment, buyers, length = self.trainData()
-                    #print(itemSegment,buyers)
-                    self.U, self.V = self.sess.run([user_embeddings, item_embeddings], 
-                                                   feed_dict={self.item_index: itemSegment, self.buyers_length: length, self.buyers: buyers})
+                    #itemSegment, buyers, length = self.trainData()
+                item_index = np.random.randint(0, self.num_items)
+                
+                self.U, self.V = self.sess.run([user_embeddings, item_embeddings], 
+                                               feed_dict={self.item_index: item_index})
                 _, l = self.sess.run([train, loss],
-                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.item_index: itemSegment, self.buyers_length: length, self.buyers: buyers})
+                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.item_index: item_index})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
             self.ranking_performance(epoch)
         self.U,self.V = self.bestU,self.bestV
         
     def saveModel(self):
-        #self.bestU, self.bestV = self.sess.run([self.user_embeddings, self.item_embeddings])
+        self.bestU, self.bestV = self.sess.run([self.user_embeddings, self.item_embeddings])
         pass
         
     def predictForRanking(self, u):
