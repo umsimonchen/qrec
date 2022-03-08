@@ -80,7 +80,8 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         all_item_embeddings = [item_embeddings] * 3
             
         #item diffusion tensor initialization
-        self.item_index = tf.placeholder(tf.int32, name="item_index")
+        self.item_index = tf.placeholder(tf.int32, shape=(0,), name="item_index")
+        item_index = self.item_index
         
         buyer_table = []
         for key in self.data.trainSet_i.keys():
@@ -88,7 +89,7 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             for value in self.data.trainSet_i[key].keys():
                 tmp[self.data.user[value]] = 1
             buyer_table.append(tmp)
-        buyer_table = tf.constant(buyer_table)
+        buyer_table = tf.constant(buyer_table, dtype=tf.int32, shape=(self.num_items, self.num_users))
         
         #user diffusion tensor initialization
         #self.user_index = tf.placeholder(tf.int32, shape=[], name="user_index")
@@ -114,28 +115,28 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
                 initializer([2 * self.emb_size, 1]), name='mlp_four_out_weights%d' % k)
 
             #Item diffusion      
-            new_item_embeddings = tf.identity(all_item_embeddings[k])
-            
-            item_index = self.item_index
+            new_item_embeddings = all_item_embeddings[k]
+            print(tf.shape(item_index))
             i_embedding = tf.reshape(tf.nn.embedding_lookup(all_item_embeddings[k], self.item_index), [1, self.emb_size])
             buyer = tf.reduce_sum(tf.gather(buyer_table, item_index),0)
             i_embedding = [tf.reduce_sum(i_embedding,0)] * self.num_users
             vu_ego_embedding = tf.concat([i_embedding, all_user_embeddings[k]], 1)
             vu_ego_embedding = tf.matmul(vu_ego_embedding,self.weights['mlp_one_in_weights%d' % k])
             vu_ego_embedding = tf.matmul(vu_ego_embedding,self.weights['mlp_one_out_weights%d' % k])
-            condition = tf.reduce_sum(tf.transpose(tf.where(buyer==1)),0)
+
+            condition = tf.transpose(tf.where(buyer==1))
+            condition = tf.reduce_sum(condition, 0)
             buyers_embedding = tf.gather(all_user_embeddings[k], condition)
             vu_ego_embedding = tf.gather(vu_ego_embedding, condition)
             vu_ego_embedding = tf.nn.relu(vu_ego_embedding)
             eta = tf.nn.softmax(tf.transpose(vu_ego_embedding))
             new_item_embedding = tf.matmul(eta,buyers_embedding)
             
-            new_item_embeddings = tf.concat([new_item_embeddings[:item_index], new_item_embedding, new_item_embeddings[item_index+1:]], 0)
-            print(tf.shape(new_item_embeddings))
+            all_item_embeddings[k+1] = tf.concat([all_item_embeddings[k+1][:item_index], new_item_embedding, all_item_embeddings[k][item_index+1:]], 0)
 
             #User diffusion
             i=1
-            new_user_embeddings = tf.identity(all_user_embeddings[k])
+            new_user_embeddings = all_user_embeddings[k]
             '''
             user_embedding = tf.gather(all_user_embeddings[k], user_index)
             
@@ -181,9 +182,7 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             print("Finished MLP 2,3,4: %d/%d/Layer %d" %(i,len(self.social.followees),k+1))
             i+=1
             '''
-            all_item_embeddings.append(new_item_embeddings)
-            all_user_embeddings.append(new_user_embeddings)
-            
+            all_user_embeddings[k+1] = new_user_embeddings
         #Organization
         for j in range(1,self.n_layers):
             user_embeddings = tf.concat([all_user_embeddings[j], user_embeddings], 1)
@@ -209,7 +208,6 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch               
-                    #itemSegment, buyers, length = self.trainData()
                 item_index = np.random.randint(0, self.num_items)
                 
                 self.U, self.V = self.sess.run([user_embeddings, item_embeddings], 
@@ -222,7 +220,6 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         
     def saveModel(self):
         self.bestU, self.bestV = self.sess.run([self.user_embeddings, self.item_embeddings])
-        pass
         
     def predictForRanking(self, u):
         'invoked to rank all the items for the user'
