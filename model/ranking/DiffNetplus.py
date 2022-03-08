@@ -22,19 +22,21 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         GraphRecommender.__init__(self, conf=conf, trainingSet=trainingSet, testSet=testSet, fold=fold)
         SocialRecommender.__init__(self, conf=conf, trainingSet=trainingSet, testSet=testSet, relation=relation,fold=fold)
     
-    def trainData(self):
+    def trainItemData(self):
         itemSegment = np.random.randint(0, self.num_items)
         buyers = []
         buyers_length = 0
         for buyer in self.data.trainSet_i[self.data.id2item[itemSegment]].keys():
             buyers.append(self.data.user[buyer])
             buyers_length += 1
-            
+        return itemSegment, buyers, buyers_length
+    
+    def trainUserData(self):
         userSegment = np.random.randint(0, self.num_users)
         followees = []
         followees_length = 0
         bought_items = []
-        bought_length =0
+        bought_length = 0
         for followee in self.social.followees[self.data.id2user[userSegment]].keys():
             followees.append(self.data.user[followee])
             followees_length += 1
@@ -42,7 +44,7 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             bought_items.append(self.data.item[item])
             bought_length += 1
             
-        return itemSegment, buyers, buyers_length
+        return userSegment, followees, followees_length, bought_items, bought_length
     
     def readConfiguration(self):
         super(DiffNetplus, self).readConfiguration()
@@ -86,8 +88,11 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
                 
         #user diffusion tensor initialization
         self.user_index = tf.placeholder(tf.int32, shape=[], name="user_index")
-        
-        
+        self.followees_length = tf.placeholder(tf.int32, shape=[], name="followees_length")
+        self.followees = tf.placeholder(tf.int32, shape=[None,], name="followees")
+        self.bought_length = tf.placeholder(tf.int32, shape=[], name="bought_length")
+        self.bought_items = tf.placeholder(tf.int32, shape=[None,], name="bought_items")
+                
         #Layers
         for k in range(self.n_layers):
             self.weights['mlp_one_in_weights%d' % k] = tf.Variable(
@@ -107,61 +112,49 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             self.weights['mlp_four_out_weights%d' % k] = tf.Variable(
                 initializer([2 * self.emb_size, 1]), name='mlp_four_out_weights%d' % k)
 
-            #Item diffusion
-            i=1       
             new_item_embeddings = tf.identity(all_item_embeddings[k])
             item_embedding = tf.reshape(tf.nn.embedding_lookup(all_item_embeddings[k], self.item_index), [1, self.emb_size])
-            
             buyers_embedding = tf.nn.embedding_lookup(all_user_embeddings[k], self.buyers)
+            
             vu_ego_embedding = tf.concat([tf.tile(item_embedding, [self.buyers_length,1]), buyers_embedding], 1)
             vu_ego_embedding = tf.matmul(vu_ego_embedding,self.weights['mlp_one_in_weights%d' % k])
             vu_ego_embedding = tf.matmul(vu_ego_embedding,self.weights['mlp_one_out_weights%d' % k])
-            #buyers_embedding = tf.nn.embedding_lookup(vu_ego_embedding, self.buyers)
             vu_ego_embedding = tf.nn.relu(vu_ego_embedding)
             eta = tf.nn.softmax(tf.transpose(vu_ego_embedding))
             
-            print(self.num_items)
             new_item_embedding =  tf.matmul(eta,buyers_embedding)
             tmp = tf.concat([new_item_embeddings[:self.item_index], new_item_embedding], 0)
             new_item_embeddings = tf.concat([tmp, new_item_embeddings[self.item_index+1:]], 0)
-            print("Finished MLP 1: %d/%d/Layer %d" %(i+1,100,k+1))
             #i+=1
             
             #User diffusion
             i=1
             new_user_embeddings = tf.identity(all_user_embeddings[k])
-            '''
-            user_embedding = tf.gather(all_user_embeddings[k], user_index)
+            user_embedding = tf.reshape(tf.nn.embedding_lookup(all_user_embeddings[k], self.user_index), [1, self.emb_size])
+            followees_embedding = tf.nn.embedding_lookup(all_user_embeddings[k], self.followees)
+            bought_items_embedding = tf.nn.embedding_lookup(all_item_embeddings[k], self.bought_items)
             
             #User neighbor
-            followees_index = []
-            for followee in self.social.followees[user].keys():
-                followees_index.append(self.data.user[followee])
-            followees_embedding = tf.gather(all_user_embeddings[k], followees_index)
-            uu_ego_embedding = tf.concat([[user_embedding]*len(self.social.followees[user]), followees_embedding], 1)
+            uu_ego_embedding = tf.concat([tf.tile(user_embedding, [self.followees_length,1]), followees_embedding], 1)
             uu_ego_embedding = tf.matmul(uu_ego_embedding,self.weights['mlp_two_in_weights%d' % k])
             uu_ego_embedding = tf.matmul(uu_ego_embedding,self.weights['mlp_two_out_weights%d' % k])
             uu_ego_embedding = tf.nn.relu(uu_ego_embedding)
-            alpha = tf.nn.softmax(tf.reshape(uu_ego_embedding, [1, len(self.social.followees[user])]))
+            alpha = tf.nn.softmax(tf.transpose(uu_ego_embedding))
             
             user_neighbors_embedding = tf.matmul(alpha,followees_embedding)
             
             #Item neighbor
-            items_index = []
-            for item in self.data.trainSet_u[user].keys():
-                items_index.append(self.data.item[item])
-            items_embedding = tf.gather(all_item_embeddings[k], items_index)
-            uv_ego_embedding = tf.concat([[user_embedding]*len(self.data.trainSet_u[user]), items_embedding], 1)
+            uv_ego_embedding = tf.concat([tf.tile(user_embedding, [self.bought_length,1]), bought_items_embedding], 1)
             uv_ego_embedding = tf.matmul(uv_ego_embedding,self.weights['mlp_three_in_weights%d' % k])
             uv_ego_embedding = tf.matmul(uv_ego_embedding,self.weights['mlp_three_out_weights%d' % k])
             uv_ego_embedding = tf.nn.relu(uv_ego_embedding)
-            beta = tf.nn.softmax(tf.reshape(uv_ego_embedding, [1, len(self.data.trainSet_u[user])]))
+            beta = tf.nn.softmax(tf.transpose(uv_ego_embedding))
             
-            item_neighbors_embedding = tf.matmul(beta,items_embedding)
+            item_neighbors_embedding = tf.matmul(beta,bought_items_embedding)
             
             #Aggregation
-            up_ego_embedding = tf.concat([[user_embedding], user_neighbors_embedding], 1)
-            uq_ego_embedding = tf.concat([[user_embedding], item_neighbors_embedding], 1)
+            up_ego_embedding = tf.concat([user_embedding, user_neighbors_embedding], 1)
+            uq_ego_embedding = tf.concat([user_embedding, item_neighbors_embedding], 1)
             upq_ego_embedding = tf.concat([up_ego_embedding, uq_ego_embedding], 0)
             upq_ego_embedding = tf.matmul(upq_ego_embedding,self.weights['mlp_four_in_weights%d' % k])
             upq_ego_embedding = tf.matmul(upq_ego_embedding,self.weights['mlp_four_out_weights%d' % k])
@@ -169,12 +162,9 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             gamma = tf.nn.softmax(tf.reshape(upq_ego_embedding, [1, 2]))
             
             new_user_embedding = tf.matmul(gamma,tf.concat([user_neighbors_embedding, item_neighbors_embedding], 0))
-            tmp = tf.concat([new_user_embeddings[:user_index], new_user_embedding], 0)                
-            new_user_embeddings = tf.concat([tmp, new_user_embeddings[user_index+1:]], 0) 
-            
-            print("Finished MLP 2,3,4: %d/%d/Layer %d" %(i,len(self.social.followees),k+1))
-            i+=1
-            '''
+            tmp = tf.concat([new_user_embeddings[:self.user_index], new_user_embedding], 0)                
+            new_user_embeddings = tf.concat([tmp, new_user_embeddings[self.user_index+1:]], 0) 
+
             all_item_embeddings.append(new_item_embeddings)
             all_user_embeddings.append(new_user_embeddings)
         
@@ -203,12 +193,18 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch               
                 for i in range(100):
-                    itemSegment, buyers, length = self.trainData()
+                    itemSegment, buyers, buyers_length = self.trainItemData()
+                    userSegment, followees, followees_length, bought_items, bought_length = self.trainUserData()
                     #print(itemSegment,buyers)
                     self.U, self.V = self.sess.run([user_embeddings, item_embeddings], 
-                                                   feed_dict={self.item_index: itemSegment, self.buyers_length: length, self.buyers: buyers})
+                                                   feed_dict={self.item_index: itemSegment, self.buyers_length: buyers_length, self.buyers: buyers, \
+                                                              self.user_index: userSegment, self.followees_length: followees_length, self.followees: followees, \
+                                                              self.bought_length: bought_length, self.bought_items: bought_items})
                 _, l = self.sess.run([train, loss],
-                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.item_index: itemSegment, self.buyers_length: length, self.buyers: buyers})
+                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, 
+                                                self.item_index: itemSegment, self.buyers_length: buyers_length, self.buyers: buyers,\
+                                                    self.user_index: userSegment, self.followees_length: followees_length, self.followees: followees, \
+                                                    self.bought_length: bought_length, self.bought_items: bought_items})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
             self.ranking_performance(epoch)
         self.U,self.V = self.bestU,self.bestV
