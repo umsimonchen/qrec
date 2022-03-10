@@ -19,7 +19,7 @@ class Measure(object):
             predicted = [item[0] for item in res[user]]
             hitCount[user] = len(set(items).intersection(set(predicted)))
         return hitCount
-
+    
     @staticmethod
     def rankingMeasure(origin, res, N):
         measure = []
@@ -34,7 +34,7 @@ class Measure(object):
             if len(origin) != len(predicted):
                 print('The Lengths of test set and predicted set are not match!')
                 exit(-1)
-            hits = Measure.hits(origin, predicted)
+            hits= Measure.hits(origin, predicted)
             prec = Measure.precision(hits, n)
             indicators.append('Precision:' + str(prec) + '\n')
             recall = Measure.recall(hits, origin)

@@ -191,7 +191,7 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch
-                for i in range(10):
+                for i in range(100):
                     itemSegment, buyers, buyers_length = self.trainItemData(i_idx[i])
                     userSegment, followees, followees_length, bought_items, bought_length = self.trainUserData(user_idx[i])
                     self.U, self.V = self.sess.run([self.user_embeddings, self.item_embeddings], 
@@ -213,8 +213,10 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         
     def predictForRanking(self, u):
         'invoked to rank all the items for the user'
+        #print(type(self.V),type(self.U))
         if self.data.containsUser(u):
             u = self.data.getUserId(u)
+            #print(self.V.dot(self.U[u]))
             return self.V.dot(self.U[u])
         else:
             return [self.data.globalMean] * self.num_items

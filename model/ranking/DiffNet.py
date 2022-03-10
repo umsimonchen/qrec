@@ -43,7 +43,7 @@ class DiffNet(SocialRecommender,GraphRecommender):
                 initializer([2 * self.emb_size, self.emb_size]), name='weights%d' % k)
 
         user_embeddings = self.user_embeddings
-        print(self.data.trainingData)
+        #print(self.data.trainingData)
         for k in range(self.n_layers):
             new_user_embeddings = tf.sparse_tensor_dense_matmul(self.S,user_embeddings) #m*d
             user_embeddings = tf.matmul(tf.concat([new_user_embeddings,user_embeddings],1),self.weights['weights%d' % k]) #m*2d 2d*d = m*d

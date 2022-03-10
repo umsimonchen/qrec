@@ -133,12 +133,13 @@ def denormalize(vec,maxVal,minVal):
 @jit(nopython=True)
 def find_k_largest(K,candidates):
     n_candidates = []
-    #initialize
+    #initialize-random get K items
     for iid,score in enumerate(candidates[:K]):
         n_candidates.append((iid, score))
-    n_candidates.sort(key=lambda d: d[1], reverse=True) #sort by score
+    n_candidates.sort(key=lambda d: d[1], reverse=True) #sort by score from large to small
     k_largest_scores = [item[1] for item in n_candidates]
     ids = [item[0] for item in n_candidates]
+    #print(k_largest_scores, ids)
     # find the N biggest scores
     for iid,score in enumerate(candidates):
         ind = K #final order
@@ -162,4 +163,5 @@ def find_k_largest(K,candidates):
         if ind < K - 1:
             k_largest_scores[ind + 1] = score
             ids[ind + 1] = iid
+    #print(k_largest_scores, ids)
     return ids,k_largest_scores
