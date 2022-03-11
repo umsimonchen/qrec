@@ -12,6 +12,8 @@ import sys
 import os
 import pandas as pd
 import numpy as np
+import time
+import datetime
 
 # Load review data
 # =============================================================================
@@ -74,27 +76,27 @@ import numpy as np
 #Name user id to idx
 csv_file_path="yelp_academic_dataset_review.csv"
 df_review_bus = pd.read_csv(csv_file_path)
-df_review_bus.sort_values(by=['user_id', 'business_id'])
-df_review_bus['u_idx'] = -1
-df_review_bus['b_idx'] = -1
-user_dict = {}
-business_dict = {}
-user_idx = 0
-business_idx = 0
-for i, row in df_review_bus.iterrows():
-    if row['user_id'] in user_dict:
-        df_review_bus.loc[i,'u_idx'] = user_dict[row['user_id']]
-    else:
-        user_dict[row['user_id']] = user_idx
-        df_review_bus.loc[i,'u_idx'] = user_idx
-        user_idx += 1
-    if row['business_id'] in business_dict:
-        df_review_bus.loc[i,'b_idx'] = business_dict[row['business_id']]
-    else:
-        business_dict[row['business_id']] = business_idx
-        df_review_bus.loc[i,'b_idx'] = business_idx
-        business_idx += 1
-    print('Finished: %d/6990280' %(i+1))
+user = df_review_bus['user_id'].sort_values()
+user = pd.unique(user)
+user = user.tolist()
+user_idx = [i for i in range(len(user))]
+user_dict = dict(zip(user,user_idx))
+
+business = df_review_bus['business_id'].sort_values()
+business = pd.unique(business)
+business = business.tolist()
+business_idx = [i for i in range(len(business))]
+business_dict = dict(zip(business,business_idx))
+
+df_review_bus = df_review_bus.sort_values(by=['user_id', 'business_id'])
+j = 0
+with open('ratings.txt', 'w') as f:
+    for i, row in df_review_bus.iterrows():
+        tmsm = time.mktime(datetime.datetime.strptime(row['date'],"%Y-%m-%d %H:%M:%S").timetuple())
+        f.write(str(user_dict[row['user_id']])+' '+str(business_dict[row['business_id']])+' '+str(row['stars'])+' '+str(int(tmsm)))
+        f.write('\n')
+        print('Finished: %d/6990280' %(j+1))
+        j+=1
 
 
 
