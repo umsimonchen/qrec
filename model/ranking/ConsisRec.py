@@ -53,11 +53,19 @@ class ConsisRec(SocialRecommender,GraphRecommender):
     
     def initModel(self):
         super(ConsisRec, self).initModel()
-          
+                  
     def trainModel(self):
         self.weights = {}
         initializer = tf.contrib.layers.xavier_initializer()
-        user_item_embeddings = tf.Variable(tf.truncated_normal(shape=[self.num_users, self.num_items, self.emb_size], stddev=0.005), name='U_V')
+        user_item_map = np.full((self.num_users, self.num_items), -1, dtype=np.int32)
+        user_item_index = 0
+        for user in self.data.trainSet_u.keys():
+            for item in self.data.trainSet_u[user].keys():
+                user_item_map[self.data.user[user]][self.data.item[item]] = user_item_index
+                user_item_index += 1
+        user_item_map = tf.convert_to_tensor(user_item_map)
+        user_item_embeddings = tf.Variable(tf.truncated_normal(shape=[user_item_index+1, self.emb_size], stddev=0.005), name='U_U')
+        
         user_user_embeddings = tf.Variable(tf.truncated_normal(shape=[self.num_users, self.num_users, self.emb_size], stddev=0.005), name='U_U')
         
         self.weights['query_weights'] = tf.Variable(
@@ -98,8 +106,9 @@ class ConsisRec(SocialRecommender,GraphRecommender):
             si_user = si_user / tf.norm(si_user,1) #norm 1
             new_hi_user = tf.multiply(si_user, tf.transpose(hi_user)) #d*j
             
-            ei_index = tf.stack([self.buyers, tf.tile([self.item_index], [self.buyers_length])], axis=1)
-            ei = tf.gather_nd(user_item_embeddings, ei_index) #j*d
+            ei_index = tf.stack([self.buyers, tf.tile([self.item_index], [self.buyers_length])], axis=1) #j*2
+            ei_emb_index = tf.gather_nd(user_item_map, ei_index)
+            ei = tf.nn.embedding_lookup(user_item_embeddings, ei_emb_index) #j*d
             ei_ego = tf.concat([hi_user, ei], 1) #j*2d
             ai = tf.matmul(ei_ego, self.weights['attention_weights']) #j*1
             ai = tf.nn.softmax(tf.transpose(ai)) #1*j
