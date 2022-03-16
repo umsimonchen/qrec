@@ -1,26 +1,29 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Mar 14 15:51:47 2022
+
+@author: simon
+"""
 from base.graphRecommender import GraphRecommender
 from base.socialRecommender import SocialRecommender
 import tensorflow as tf
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csr_matrix
 import numpy as np
 np.seterr(divide='ignore',invalid='ignore')
 from util.loss import bpr_loss
 import os
 from util import config
 from math import sqrt
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3" #INFO（通知）<WARNING（警告）<ERROR（错误）<FATAL（致命的）,here only FATAL
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-# Recommended Maximum Epoch Setting: LastFM 120 Douban 30 Yelp 30
-# A slight performance drop is observed when we transplanted the model from python2 to python3. The cause is unclear.
-
-class MHCN(SocialRecommender,GraphRecommender):
+class SLDR(SocialRecommender,GraphRecommender):
     def __init__(self, conf, trainingSet=None, testSet=None, relation=None, fold='[1]'):
         GraphRecommender.__init__(self, conf=conf, trainingSet=trainingSet, testSet=testSet, fold=fold)
         SocialRecommender.__init__(self, conf=conf, trainingSet=trainingSet, testSet=testSet, relation=relation,fold=fold)
-
+    
     def readConfiguration(self):
-        super(MHCN, self).readConfiguration()
-        args = config.OptionConf(self.config['MHCN'])
+        super(SLDR, self).readConfiguration()
+        args = config.OptionConf(self.config['SLDR'])
         self.n_layers = int(args['-n_layer'])
         self.ss_rate = float(args['-ss_rate'])
 
@@ -58,41 +61,54 @@ class MHCN(SocialRecommender,GraphRecommender):
         self.userAdjacency = Y.tocsr() # user as row -- csr: compressed sparse row: save the value at the same place once
         self.itemAdjacency = Y.T.tocsr() # item as row
         B = S.multiply(S.T) # csr_matrix point-wise multiplication
-        U = S - B
-        C1 = (U.dot(U)).multiply(U.T)
-        A1 = C1 + C1.T
-        C2 = (B.dot(U)).multiply(U.T) + (U.dot(B)).multiply(U.T) + (U.dot(U)).multiply(B)
-        A2 = C2 + C2.T
-        C3 = (B.dot(B)).multiply(U) + (B.dot(U)).multiply(B) + (U.dot(B)).multiply(B)
-        A3 = C3 + C3.T
-        A4 = (B.dot(B)).multiply(B)
-        C5 = (U.dot(U)).multiply(U) + (U.dot(U.T)).multiply(U) + (U.T.dot(U)).multiply(U)
-        A5 = C5 + C5.T
-        A6 = (U.dot(B)).multiply(U) + (B.dot(U.T)).multiply(U.T) + (U.T.dot(U)).multiply(B)
-        A7 = (U.T.dot(B)).multiply(U.T) + (B.dot(U)).multiply(U) + (U.dot(U.T)).multiply(B)
+        U = S - B #lastFM has no element in U
+        
         A8 = (Y.dot(Y.T)).multiply(B)
         A9 = (Y.dot(Y.T)).multiply(U)
         A9 = A9+A9.T
         A10  = Y.dot(Y.T)-A8-A9
+        
         #addition and row-normalization
-        H_s = sum([A1,A2,A3,A4,A5,A6,A7])
-        H_s = H_s.multiply(1.0/H_s.sum(axis=1).reshape(-1, 1)) # axis=0 -> column; axis=1 -> row. reshape -1 means unknown, 1 means 1 value
         H_j = sum([A8,A9])
         H_j = H_j.multiply(1.0/H_j.sum(axis=1).reshape(-1, 1))
         H_p = A10
         H_p = H_p.multiply(H_p>1) #reduce noise
         H_p = H_p.multiply(1.0/H_p.sum(axis=1).reshape(-1, 1))
+        
+        T0 = (A8+A9!=0).astype(int)
+        T0 = csr_matrix(T0)
+        
+        T1b = B.dot(B)
+        T1r = B.dot(U) + U.dot(B) + U.dot(U)
+        T1l = (B.dot(U) + U.dot(B) + U.dot(U)).T
+        T1 = (Y.dot(Y.T)).multiply(T1b + T1r + T1l)
+        print(sum(T1.diagonal()))
+        T1.setdiag(0)
+        T1.eliminate_zeros()
+        T1 = csr_matrix(T1)
+        
+        T2b = T1b.dot(B)
+        T2r = T1r.dot(U) + U.dot(T1r)
+        T2l = (T1r.dot(U) + U.dot(T1r)).T
+        T2 = T2b + T2r + T2l
+        T2.setdiag(0)
+        T2.eliminate_zeros()
+        T2 = (T2!=0).astype(int)
+        T2 = csr_matrix(T2)
+        T2 = ((T0==0).multiply(T1==0)).multiply(T2)
+        
+        T = T1.multiply(1.0/T1.sum(axis=1).reshape(-1, 1))
 
-        return [H_s,H_j,H_p]
+        return [H_j,H_p,T]
 
     def adj_to_sparse_tensor(self,adj):
         adj = adj.tocoo()
         indices = np.mat(list(zip(adj.row, adj.col)))
         adj = tf.SparseTensor(indices, adj.data.astype(np.float32), adj.shape)
         return adj
-
+    
     def initModel(self):
-        super(MHCN, self).initModel()
+        super(SLDR, self).initModel()
         M_matrices = self.buildMotifInducedAdjacencyMatrix()
         self.weights = {}
         initializer = tf.contrib.layers.xavier_initializer()
@@ -249,3 +265,35 @@ class MHCN(SocialRecommender,GraphRecommender):
             return self.V.dot(self.U[u]) #sum product over D: n*d . 1*d = n
         else:
             return [self.data.globalMean] * self.num_items #assume all are interested
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
