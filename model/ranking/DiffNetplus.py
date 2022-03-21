@@ -12,7 +12,7 @@ from scipy.sparse import coo_matrix
 import numpy as np
 import os
 from util import config
-
+from random import choice
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 tf.reset_default_graph()
 #For general comparison. We do not include the user/item features extracted from text/images
@@ -50,7 +50,30 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         super(DiffNetplus, self).readConfiguration()
         args = config.OptionConf(self.config['DiffNetplus'])
         self.n_layers = int(args['-n_layer']) #the number of layers of the recommendation module (discriminator)
-
+    
+    def next_batch_pairwise_one_out(self):
+        batch_id = 0
+        batch_end = len(self.data.trainingData)
+        while batch_id < batch_end:
+            users = [self.data.trainingData[idx][0] for idx in range(batch_end) if idx != batch_id] # real user id
+            items = [self.data.trainingData[idx][1] for idx in range(batch_end) if idx != batch_id] # real item id
+                     
+            u_idx, i_idx, j_idx = [], [], []
+            self.data.testSet_u = {self.data.trainingData[batch_id][0]: {self.data.trainingData[batch_id][0]:1.0}}
+            item_list = list(self.data.item.keys())
+            for i, user in enumerate(users):
+                i_idx.append(self.data.item[items[i]]) # training item id, positive since training data recorded
+                u_idx.append(self.data.user[user]) # training user id
+                neg_item = choice(item_list) # random choose one as negative sample with real user/item id
+                # make sure it negative sample or replace it
+                while neg_item in self.data.trainSet_u[user]:
+                    neg_item = choice(item_list)
+                j_idx.append(self.data.item[neg_item])
+                
+            yield u_idx, i_idx, j_idx # return a batch of training data
+            
+            batch_id += 1
+            
     def buildSparseRelationMatrix(self):
         row, col, entries = [], [], []
         for pair in self.social.relation:
@@ -59,7 +82,7 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             entries += [1.0/len(self.social.followees[pair[0]])]
         AdjacencyMatrix = coo_matrix((entries, (row, col)), shape=(self.num_users,self.num_users),dtype=np.float32)
         return AdjacencyMatrix
-
+    
     def initModel(self):
         super(DiffNetplus, self).initModel()
         S = self.buildSparseRelationMatrix()
@@ -114,7 +137,6 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
                 initializer([2 * self.emb_size, 1]), name='mlp_four_out_weights%d' % k)
             
             #Item diffusion
-            new_item_embeddings = tf.identity(all_item_embeddings[k])
             item_embedding = tf.reshape(tf.nn.embedding_lookup(all_item_embeddings[k], self.item_index), [1, self.emb_size])
             buyers_embedding = tf.nn.embedding_lookup(all_user_embeddings[k], self.buyers)
             
@@ -129,7 +151,6 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
             all_item_embeddings[k+1] = tf.concat([all_item_embeddings[k+1][:self.item_index], new_item_embedding, all_item_embeddings[k+1][self.item_index+1:]], 0)
             
             #User diffusion
-            new_user_embeddings = tf.identity(all_user_embeddings[k])
             user_embedding = tf.reshape(tf.nn.embedding_lookup(all_user_embeddings[k], self.user_index), [1, self.emb_size])
             followees_embedding = tf.nn.embedding_lookup(all_user_embeddings[k], self.followees)
             bought_items_embedding = tf.nn.embedding_lookup(all_item_embeddings[k], self.bought_items)
@@ -188,10 +209,11 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         train = opt.minimize(loss)
         init = tf.global_variables_initializer()
         self.sess.run(init)
+        
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch
-                for i in range(100):
+                for i in range(1): # i is hyperparameter, 1 and 10 are optimal
                     itemSegment, buyers, buyers_length = self.trainItemData(i_idx[i])
                     userSegment, followees, followees_length, bought_items, bought_length = self.trainUserData(user_idx[i])
                     self.U, self.V = self.sess.run([self.user_embeddings, self.item_embeddings], 

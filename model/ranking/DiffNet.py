@@ -6,7 +6,7 @@ import numpy as np
 import os
 from util import config
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-
+from random import choice
 #For general comparison. We do not include the user/item features extracted from text/images
 
 class DiffNet(SocialRecommender,GraphRecommender):
@@ -27,7 +27,7 @@ class DiffNet(SocialRecommender,GraphRecommender):
             entries += [1.0/len(self.social.followees[pair[0]])]
         AdjacencyMatrix = coo_matrix((entries, (row, col)), shape=(self.num_users,self.num_users),dtype=np.float32)
         return AdjacencyMatrix
-
+            
     def initModel(self):
         super(DiffNet, self).initModel()
         S = self.buildSparseRelationMatrix()
@@ -72,7 +72,8 @@ class DiffNet(SocialRecommender,GraphRecommender):
                 _, l = self.sess.run([train, loss],
                                      feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
-
+            self.ranking_performance(epoch)
+                
     def predictForRanking(self, u):
         'invoked to rank all the items for the user'
         if self.data.containsUser(u):
