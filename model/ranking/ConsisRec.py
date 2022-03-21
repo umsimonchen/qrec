@@ -196,7 +196,7 @@ class ConsisRec(SocialRecommender,GraphRecommender):
         
         for k in range(self.n_layers):
             #item
-            new_hv_item = tf.cond(tf.equal(self.item_neighbors_len, 0), lambda: only_user_item(), lambda: item_item())   
+            new_hv_item = tf.cond(tf.equal(self.item_neighbors_len, 0), lambda: only_user_item(), lambda: only_user_item())   
             all_item_embeddings[k+1] = tf.concat([all_item_embeddings[k+1][:self.item_index], new_hv_item, all_item_embeddings[k+1][self.item_index+1:]], 0)
             
             #user
@@ -288,6 +288,7 @@ class ConsisRec(SocialRecommender,GraphRecommender):
                 _, l = self.sess.run([train, loss],
                                      feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, 
                                                 self.item_index: itemSegment, self.buyers_length: buyers_length, self.buyers: buyers,\
+                                                    self.item_neighbors: item_neighbors, self.item_neighbors_len: item_neighbors_len, \
                                                     self.user_index: userSegment, self.neighbors_length: neighbors_length, self.neighbors: neighbors, \
                                                     self.bought_length: bought_length, self.bought_items: bought_items})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
