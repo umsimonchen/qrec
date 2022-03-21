@@ -145,52 +145,53 @@ class ConsisRec(SocialRecommender,GraphRecommender):
             hv_item = tf.reshape(tf.nn.embedding_lookup(all_item_embeddings[k], self.item_index), [1, self.emb_size])
             hi_user = tf.nn.embedding_lookup(all_user_embeddings[k], self.buyers) #j*d
             
-            # qi_user = tf.concat([tf.tile(hv_item, [self.buyers_length,1]), hi_user], 1) #j*2d
-            # qi_user = tf.matmul(qi_user, self.weights['query_weights']) #j*d
-            # si_user = tf.norm(qi_user-hi_user, axis=1) #j*1 
-            # si_user = tf.transpose(tf.math.exp(-si_user)) #1*j
-            # si_user = si_user / tf.norm(si_user,1) #norm 1
-            # new_hi_user = tf.multiply(si_user, tf.transpose(hi_user)) #d*j
-
-            # ei_index = tf.stack([self.buyers, tf.tile([self.item_index], [self.buyers_length])], axis=1) #j*2
-            # ei_emb_index = tf.gather_nd(user_item_map, ei_index)
-            # ei = tf.nn.embedding_lookup(user_item_embeddings, ei_emb_index) #j*d
-            # ei_ego = tf.concat([hi_user, ei], 1) #j*2d
-            # ai = tf.matmul(ei_ego, self.weights['attention_weights']) #j*1
-            # ai = tf.nn.softmax(tf.transpose(ai)) #1*j
-
-            # new_hi_user = tf.reduce_sum(tf.transpose(tf.multiply(ai, new_hi_user)), 0) #d*j -> j*d -> d
-            # hi_ego = tf.concat([hv_item, [new_hi_user]], 1)
-            # new_hv_item = tf.nn.relu(tf.matmul(hi_ego, self.weights['neighbor_sample%d' % k]))
-
-# Item relations
-            hi_item_neighbor = tf.nn.embedding_lookup(all_item_embeddings[k], self.item_neighbors)
-            hi_item_ego = tf.concat([hi_item_neighbor, hi_user], 0)
-            positive_user = tf.nn.embedding_lookup(all_user_embeddings[k], [self.buyers[0]])
-            
-            qi_user = tf.concat([hi_user, tf.tile(hv_item, [self.buyers_length, 1])], 1) #j*2d
-            qi_item_neighbor = tf.concat([tf.tile(positive_user, [self.item_neighbors_len, 1]), hi_item_neighbor], 1)
-            qi_item_ego = tf.concat([qi_item_neighbor, qi_user], 0)
-            qi_item_ego = tf.matmul(qi_item_ego, self.weights['query_weights']) #j*d
-            si_item_ego = tf.math.square(tf.norm(qi_item_ego-hi_item_ego, axis=1)) #j*1 
-            si_item_ego = tf.transpose(tf.math.exp(-si_item_ego)) #1*j
-            si_item_ego = si_item_ego / (tf.norm(si_item_ego,1)+1e-8) #norm 1
-            new_hi_item_ego = tf.multiply(si_item_ego, tf.transpose(hi_item_ego)) #d*j
-            
-            ei_user_index = tf.stack([self.buyers, tf.tile([self.item_index], [self.buyers_length])], axis=1) #j*2
-            ei_user_emb_index = tf.gather_nd(user_item_map, ei_user_index)
-            ei_user = tf.nn.embedding_lookup(user_item_embeddings, ei_user_emb_index) #j*d
-            ei_neighbor_index = tf.stack([tf.tile([self.item_index], [self.item_neighbors_len]), self.item_neighbors], axis=1)
-            ei_neighbor_emb_index = tf.gather_nd(item_item_map, ei_neighbor_index)
-            ei_neighbor = tf.nn.embedding_lookup(item_item_embeddings, ei_neighbor_emb_index)
-            ei_item_ego = tf.concat([ei_user, ei_neighbor], 0)
-            ei_item_ego = tf.concat([hi_item_ego, ei_item_ego], 1) #j*2d
-            ai_item = tf.matmul(ei_item_ego, self.weights['attention_weights']) #j*1
-            ai_item = tf.nn.softmax(tf.transpose(ai_item)) #1*j
-            
-            new_hi_item_ego = tf.reduce_sum(tf.transpose(tf.multiply(ai_item, new_hi_item_ego)), 0) #d*j -> j*d -> d
-            new_hi_item_ego = tf.concat([hv_item, [new_hi_item_ego]], 1)
-            new_hv_item = tf.nn.relu(tf.matmul(new_hi_item_ego, self.weights['neighbor_sample%d' % k]))
+            # Only user_item
+            if tf.equal(self.item_neighbors_len, 0):
+                qi_user = tf.concat([tf.tile(hv_item, [self.buyers_length,1]), hi_user], 1) #j*2d
+                qi_user = tf.matmul(qi_user, self.weights['query_weights']) #j*d
+                si_user = tf.norm(qi_user-hi_user, axis=1) #j*1 
+                si_user = tf.transpose(tf.math.exp(-si_user)) #1*j
+                si_user = si_user / tf.norm(si_user,1) #norm 1
+                new_hi_user = tf.multiply(si_user, tf.transpose(hi_user)) #d*j
+    
+                ei_index = tf.stack([self.buyers, tf.tile([self.item_index], [self.buyers_length])], axis=1) #j*2
+                ei_emb_index = tf.gather_nd(user_item_map, ei_index)
+                ei = tf.nn.embedding_lookup(user_item_embeddings, ei_emb_index) #j*d
+                ei_ego = tf.concat([hi_user, ei], 1) #j*2d
+                ai = tf.matmul(ei_ego, self.weights['attention_weights']) #j*1
+                ai = tf.nn.softmax(tf.transpose(ai)) #1*j
+    
+                new_hi_user = tf.reduce_sum(tf.transpose(tf.multiply(ai, new_hi_user)), 0) #d*j -> j*d -> d
+                hi_ego = tf.concat([hv_item, [new_hi_user]], 1)
+                new_hv_item = tf.nn.relu(tf.matmul(hi_ego, self.weights['neighbor_sample%d' % k]))
+            else:
+                hi_item_neighbor = tf.nn.embedding_lookup(all_item_embeddings[k], self.item_neighbors)
+                hi_item_ego = tf.concat([hi_item_neighbor, hi_user], 0)
+                positive_user = tf.nn.embedding_lookup(all_user_embeddings[k], [self.buyers[0]])
+                
+                qi_user = tf.concat([hi_user, tf.tile(hv_item, [self.buyers_length, 1])], 1) #j*2d
+                qi_item_neighbor = tf.concat([tf.tile(positive_user, [self.item_neighbors_len, 1]), hi_item_neighbor], 1)
+                qi_item_ego = tf.concat([qi_item_neighbor, qi_user], 0)
+                qi_item_ego = tf.matmul(qi_item_ego, self.weights['query_weights']) #j*d
+                si_item_ego = tf.math.square(tf.norm(qi_item_ego-hi_item_ego, axis=1)) #j*1 
+                si_item_ego = tf.transpose(tf.math.exp(-si_item_ego)) #1*j
+                si_item_ego = si_item_ego / (tf.norm(si_item_ego,1)+1e-8) #norm 1
+                new_hi_item_ego = tf.multiply(si_item_ego, tf.transpose(hi_item_ego)) #d*j
+                
+                ei_user_index = tf.stack([self.buyers, tf.tile([self.item_index], [self.buyers_length])], axis=1) #j*2
+                ei_user_emb_index = tf.gather_nd(user_item_map, ei_user_index)
+                ei_user = tf.nn.embedding_lookup(user_item_embeddings, ei_user_emb_index) #j*d
+                ei_neighbor_index = tf.stack([tf.tile([self.item_index], [self.item_neighbors_len]), self.item_neighbors], axis=1)
+                ei_neighbor_emb_index = tf.gather_nd(item_item_map, ei_neighbor_index)
+                ei_neighbor = tf.nn.embedding_lookup(item_item_embeddings, ei_neighbor_emb_index)
+                ei_item_ego = tf.concat([ei_user, ei_neighbor], 0)
+                ei_item_ego = tf.concat([hi_item_ego, ei_item_ego], 1) #j*2d
+                ai_item = tf.matmul(ei_item_ego, self.weights['attention_weights']) #j*1
+                ai_item = tf.nn.softmax(tf.transpose(ai_item)) #1*j
+                
+                new_hi_item_ego = tf.reduce_sum(tf.transpose(tf.multiply(ai_item, new_hi_item_ego)), 0) #d*j -> j*d -> d
+                new_hi_item_ego = tf.concat([hv_item, [new_hi_item_ego]], 1)
+                new_hv_item = tf.nn.relu(tf.matmul(new_hi_item_ego, self.weights['neighbor_sample%d' % k]))
 
             all_item_embeddings[k+1] = tf.concat([all_item_embeddings[k+1][:self.item_index], new_hv_item, all_item_embeddings[k+1][self.item_index+1:]], 0)
             
