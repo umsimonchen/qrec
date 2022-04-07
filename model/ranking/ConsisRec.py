@@ -55,7 +55,7 @@ class ConsisRec(SocialRecommender,GraphRecommender):
             neighbors.append(self.data.user[neighbor])
         neighbors = list(set(neighbors))
         neighbors = sample(neighbors, max(1, int(0.5*len(neighbors))))
-        neighbors_length = len(neighbors)    
+        neighbors_length = len(neighbors)
         
         for item in self.data.trainSet_u[self.data.id2user[userSegment]].keys():
             bought_items.append(self.data.item[item])           
@@ -196,7 +196,7 @@ class ConsisRec(SocialRecommender,GraphRecommender):
         
         for k in range(self.n_layers):
             #item
-            new_hv_item = tf.cond(tf.equal(self.item_neighbors_len, 0), lambda: only_user_item(), lambda: only_user_item())   
+            new_hv_item = tf.cond(tf.equal(self.item_neighbors_len, 0), lambda: only_user_item(), lambda: only_user_item()) #item_item use more memory   
             all_item_embeddings[k+1] = tf.concat([all_item_embeddings[k+1][:self.item_index], new_hv_item, all_item_embeddings[k+1][self.item_index+1:]], 0)
             
             #user
@@ -226,6 +226,7 @@ class ConsisRec(SocialRecommender,GraphRecommender):
 # =============================================================================
             
             hi_user_neighbor = tf.nn.embedding_lookup(all_user_embeddings[k], self.neighbors)
+            #hi_user_neighbor = tf.boolean_mask(all_user_embeddings[k], self.neighbors)
             hi_user_ego = tf.concat([hi_item, hi_user_neighbor], 0)
             positive_item = tf.nn.embedding_lookup(all_item_embeddings[k], [self.bought_items[0]]) #choose one positive item for neighbor
             
