@@ -101,6 +101,7 @@ class SLDR(SocialRecommender,GraphRecommender):
         super(SLDR, self).initModel()
         #print(self.data.trainSet_i)
         self.pos_i = tf.placeholder(tf.int32, shape=[self.num_users])
+        self.segment_u = tf.placeholder(tf.int32)
         M_matrices = self.buildMotifInducedAdjacencyMatrix()
         self.weights = {}
         initializer = tf.contrib.layers.xavier_initializer()
@@ -157,40 +158,42 @@ class SLDR(SocialRecommender,GraphRecommender):
         
         self.weights['query_weights_ui'] = tf.Variable(
             initializer([2 * self.emb_size, self.emb_size]), name='query_weights_ui')
-        def neighborWeight_ui(ego):
-            index, u, pos = tf.split(tf.reshape(ego, [1, self.num_users+2*self.emb_size]), [self.num_users, self.emb_size, self.emb_size], axis=1)
-            neighbors_concat = tf.concat([user_embeddings_c1, tf.tile(pos, [self.num_users, 1])], axis=1) #m*2d
-            query = tf.nn.relu(tf.matmul(neighbors_concat, self.weights['query_weights_ui']))#m*d
-            score = tf.math.square(tf.norm(query - tf.tile(u, [self.num_users, 1]), axis=1))#m
-            score = tf.math.exp(-score)#m
-            score = score / (tf.norm(score,1)+1e-8)
-            return score
-        
-        dense_hp = tf.sparse_tensor_to_dense(H_p)
-        neighbors_pos = tf.nn.embedding_lookup(item_embeddings, self.pos_i)#m*d
-        neighbors_ego_hp = tf.concat([dense_hp, user_embeddings_c3, neighbors_pos], axis=1)#m*(m+d+d)
-        neighbor_weight = tf.vectorized_map(fn=lambda em: neighborWeight_ui(em),elems=neighbors_ego_hp)
-        dense_hp = tf.multiply(neighbor_weight, dense_hp)
-        dense_hp = dense_hp / tf.reshape(tf.reduce_sum(dense_hp, axis=1), (-1, 1))
-        arr_idx = tf.where(tf.not_equal(dense_hp, 0))
-        H_p = tf.SparseTensor(arr_idx, tf.gather_nd(dense_hp, arr_idx), dense_hp.get_shape())
-        self.neighbors_weight = neighbor_weight
-        self.neighbors = dense_hp
-        
-        # self.weights['query_weights_uu'] = tf.Variable(
-        #     initializer([2 * self.emb_size, self.emb_size]), name='query_weights_uu')
-        # def neighborWeight_uu(ego):
+        # def neighborWeight_ui(ego):
         #     index, u, pos = tf.split(tf.reshape(ego, [1, self.num_users+2*self.emb_size]), [self.num_users, self.emb_size, self.emb_size], axis=1)
         #     neighbors_concat = tf.concat([user_embeddings_c1, tf.tile(pos, [self.num_users, 1])], axis=1) #m*2d
-        #     query = tf.nn.relu(tf.matmul(neighbors_concat, self.weights['query_weights_uu']))#m*d
+        #     query = tf.nn.relu(tf.matmul(neighbors_concat, self.weights['query_weights_ui']))#m*d
         #     score = tf.math.square(tf.norm(query - tf.tile(u, [self.num_users, 1]), axis=1))#m
         #     score = tf.math.exp(-score)#m
         #     score = score / (tf.norm(score,1)+1e-8)
         #     return score
         
-        # dense_hs = tf.sparse_tensor_to_dense(H_s)
-        # neighbors_ego_hs = tf.concat([dense_hs, user_embeddings_c1, neighbors_pos], axis=1)
-        # neighbor_weight_hs = tf.vectorized_map(fn=lambda em: neighborWeight_uu(em), elems)
+        def query(concat):
+            ego, u_embedding = tf.split(tf.reshape(concat, [1, 3*self.emb_size]), [2*self.emb_size, self.emb_size], axis=1)
+            q = tf.nn.relu(tf.matmul(ego, self.weights['query_weights_ui']))
+            score = tf.math.square(tf.norm(q-u_embedding, axis=1))
+            score = tf.math.exp(-score)
+            return score[0] #return scalar score
+        
+        def loop_user(ego):
+            ego = tf.reshape(ego, [1, 2*self.emb_size])
+            neighbors_ego = tf.concat([tf.tile(ego, [self.num_users, 1]), user_embeddings_c3], axis=1)
+            scores = tf.vectorized_map(fn=lambda em: query(em), elems=neighbors_ego)
+            print(tf.shape(scores))
+            scores = scores / (tf.norm(scores,1))
+            return scores
+            
+        dense_hp = tf.sparse_tensor_to_dense(H_p)
+        neighbors_pos = tf.nn.embedding_lookup(item_embeddings, self.pos_i)#m*d
+        neighbors_ego_hp = tf.concat([user_embeddings_c3[self.segment_u:self.segment_u+100], neighbors_pos[self.segment_u:self.segment_u+100]], axis=1)#m*(m+d+d)
+        neighbor_weight = tf.vectorized_map(fn=lambda em: loop_user(em),elems=neighbors_ego_hp)
+        #print(neighbor_weight, dense_hp[:100])
+        new_hp = tf.multiply(neighbor_weight, dense_hp[self.segment_u:self.segment_u+100])
+        dense_hp = tf.concat([dense_hp[:self.segment_u],new_hp,dense_hp[self.segment_u+100:]], axis=0)
+        dense_hp = dense_hp / tf.reshape(tf.reduce_sum(dense_hp, axis=1), (-1, 1))
+        arr_idx = tf.where(tf.not_equal(dense_hp, 0))
+        H_p = tf.SparseTensor(arr_idx, tf.gather_nd(dense_hp, arr_idx), [self.num_users, self.num_users])
+        self.neighbors_weight = neighbor_weight
+        self.neighbors = dense_hp
         
         self.ss_loss_u = 0 #self-supervised loss
         #multi-channel convolution
@@ -286,8 +289,9 @@ class SLDR(SocialRecommender,GraphRecommender):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch #size of each of them are batch_size
                 pos_i = self.sample()
+                u_i = np.random.randint(0, self.num_users)
                 nei, nei1, _, l1, l2_u, self.U, self.V = self.sess.run([self.neighbors_weight, self.neighbors, train_op, rec_loss, self.ss_loss_u, self.final_user_embeddings, self.final_item_embeddings],
-                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.pos_i: pos_i})
+                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.pos_i: pos_i, self.segment_u: u_i})
                 print(self.foldInfo,'training:', epoch + 1, 'batch', n, 'rec loss:', l1, 'ss_loss_u:', l2_u)#,'ss_loss',l2
             #self.U, self.V = self.sess.run([self.final_user_embeddings, self.final_item_embeddings]) #after sess.run() tensor turn into array
             self.ranking_performance(epoch) #iterative
