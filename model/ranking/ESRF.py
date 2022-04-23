@@ -177,6 +177,7 @@ class ESRF(SocialRecommender,GraphRecommender):
             itemEmbeddings = tf.matmul(selectedItemEmbeddings, self.d_weights['attention_m2%d' % k]) #m*d
             attentionEmbeddings = tf.concat([indexes,userEmbeddings],axis=1) #m*(k+d)
             attentionEmbeddings = tf.concat([attentionEmbeddings, itemEmbeddings], axis=1) #size=m*(k+d+d)
+            print(tf.shape(attentionEmbeddings))
             
             def attention(embedding):
                 alternativeNeighors,u_embedding,i_embedding = tf.split(tf.reshape(embedding,[1,self.K+2*self.emb_size]),[self.K,self.emb_size,self.emb_size],axis=1)
@@ -190,6 +191,8 @@ class ESRF(SocialRecommender,GraphRecommender):
                 res = tf.reduce_sum(tf.multiply(self.d_weights['attention_v%d' % k],tf.sigmoid(tf.concat([friendsEmbedding+u_embedding, i_embedding],1))), 1)
                 weights = tf.nn.softmax(res) #k
                 socialEmbedding = tf.matmul(tf.reshape(weights,[1,self.K]),tf.gather(ego_embeddings[:self.num_users],alternativeNeighors))#1*k k*d = 1*d
+                print(tf.shape(socialEmbedding))
+                print(tf.shape(socialEmbedding[0]))
                 return socialEmbedding[0] #1*d -> d
             #print(tf.size(attentionEmbeddings))
             attentive_socialEmbeddings = tf.vectorized_map(fn=lambda em: attention(em),elems=attentionEmbeddings) #get 1 element(row) of attentinonEmbedding

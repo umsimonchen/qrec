@@ -78,6 +78,7 @@ class QRec(object):
                 p = Process(target=run,args=(mDict,eval(recommender),i))
                 tasks.append(p)
                 i+=1
+                break
             #start the processes
             for p in tasks:
                 p.start()

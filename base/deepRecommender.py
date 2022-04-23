@@ -17,8 +17,8 @@ class DeepRecommender(IterativeRecommender):
 
     def initModel(self):
         super(DeepRecommender, self).initModel()
-        self.u_idx = tf.placeholder(tf.int32, name="u_idx")
-        self.v_idx = tf.placeholder(tf.int32, name="v_idx")
+        self.u_idx = tf.placeholder(tf.int32, shape=[None], name="u_idx")
+        self.v_idx = tf.placeholder(tf.int32, shape=[None], name="v_idx")
         self.r = tf.placeholder(tf.float32, name="rating")
         self.user_embeddings = tf.Variable(tf.truncated_normal(shape=[self.num_users, self.emb_size], stddev=0.005), name='U') # m*d
         self.item_embeddings = tf.Variable(tf.truncated_normal(shape=[self.num_items, self.emb_size], stddev=0.005), name='V') # n*d
@@ -47,6 +47,7 @@ class DeepRecommender(IterativeRecommender):
             for i, user in enumerate(users):
                 i_idx.append(self.data.item[items[i]]) # training item id, positive since training data recorded
                 u_idx.append(self.data.user[user]) # training user id
+                
                 neg_item = choice(item_list) # random choose one as negative sample with real user/item id
                 # make sure it negative sample or replace it
                 while neg_item in self.data.trainSet_u[user]:

@@ -89,7 +89,8 @@ class DiffNetplus(SocialRecommender,GraphRecommender):
         indices = np.mat([S.row, S.col]).transpose()
         self.S = tf.SparseTensor(indices, S.data.astype(np.float32), S.shape) #social: m*m
         self.A = self.create_sparse_adj_tensor() #item: m*n, normalized
-
+        print(self.data.item)
+        
     def trainModel(self):
         self.weights = {}
         all_user_embeddings = []

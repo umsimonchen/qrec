@@ -80,7 +80,7 @@ class MHCN(SocialRecommender,GraphRecommender):
         H_j = sum([A8,A9])
         H_j = H_j.multiply(1.0/H_j.sum(axis=1).reshape(-1, 1))
         H_p = A10
-        H_p = H_p.multiply(H_p>1) #reduce noise
+        H_p = H_p.multiply(H_p>=1) #reduce noise
         H_p = H_p.multiply(1.0/H_p.sum(axis=1).reshape(-1, 1))
 
         return [H_s,H_j,H_p]
@@ -207,12 +207,12 @@ class MHCN(SocialRecommender,GraphRecommender):
         pos = score(user_embeddings,edge_embeddings) #m*d m*d -> m*d -> m 
         neg1 = score(row_shuffle(user_embeddings),edge_embeddings)
         neg2 = score(row_column_shuffle(edge_embeddings),user_embeddings)
-        local_loss = tf.reduce_sum(-tf.log(tf.sigmoid(pos-neg1))-tf.log(tf.sigmoid(neg1-neg2))) #-tf.log(tf.sigmoid(neg1-neg2))
+        local_loss = tf.reduce_sum(-tf.log(tf.sigmoid(pos-neg1))-tf.log(tf.sigmoid(neg1-neg2))) #-tf.log(tf.sigmoid(neg1-neg2)), original have
         #Global MIM
         graph = tf.reduce_mean(edge_embeddings,0)
         pos = score(edge_embeddings,graph)
         neg1 = score(row_column_shuffle(edge_embeddings),graph)
-        global_loss = tf.reduce_sum(-tf.log(tf.sigmoid(pos-neg1))) #-tf.log(tf.sigmoid(neg1-neg2))
+        global_loss = tf.reduce_sum(-tf.log(tf.sigmoid(pos-neg1))) #-tf.log(tf.sigmoid(neg1-neg2)), original NOT have
         return global_loss+local_loss
 
     def trainModel(self):

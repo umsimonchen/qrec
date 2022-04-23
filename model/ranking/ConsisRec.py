@@ -144,7 +144,7 @@ class ConsisRec(SocialRecommender,GraphRecommender):
             hv_item = tf.reshape(tf.nn.embedding_lookup(all_item_embeddings[k], self.item_index), [1, self.emb_size])
             hi_user = tf.nn.embedding_lookup(all_user_embeddings[k], self.buyers) #j*d
             qi_user = tf.concat([tf.tile(hv_item, [self.buyers_length,1]), hi_user], 1) #j*2d
-            qi_user = tf.matmul(qi_user, self.weights['query_weights']) #j*d
+            qi_user = tf.nn.relu(tf.matmul(qi_user, self.weights['query_weights'])) #j*d
             si_user = tf.norm(qi_user-hi_user, axis=1) #j*1 
             si_user = tf.transpose(tf.math.exp(-si_user)) #1*j
             si_user = si_user / tf.norm(si_user,1) #norm 1
@@ -233,8 +233,8 @@ class ConsisRec(SocialRecommender,GraphRecommender):
             qi_item = tf.concat([tf.tile(hv_user, [self.bought_length, 1]), hi_item], 1)
             qi_user_neighbor = tf.concat([hi_user_neighbor, tf.tile(positive_item, [self.neighbors_length, 1])], 1)
             qi_user_ego = tf.concat([qi_item, qi_user_neighbor], 0) #(j+q)*2d
-            qi_user_ego = tf.matmul(qi_user_ego, self.weights['query_weights']) #(j+q)*d
-            si_user_ego = tf.math.square((tf.norm(qi_user_ego-hi_user_ego, axis=1))) #(j+q)*1
+            qi_user_ego = tf.nn.relu(tf.matmul(qi_user_ego, self.weights['query_weights'])) #(j+q)*d
+            si_user_ego = tf.math.square(tf.norm(qi_user_ego-hi_user_ego, axis=1)) #(j+q)*1
             si_user_ego = tf.transpose(tf.math.exp(-si_user_ego)) #1*(j+q)
             si_user_ego = si_user_ego / (tf.norm(si_user_ego,1)+1e-8)
             new_hi_user_ego = tf.multiply(si_user_ego, tf.transpose(hi_user_ego)) #d*(j+q)
