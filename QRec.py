@@ -56,9 +56,9 @@ class QRec(object):
             exec (importStr)
         if self.evaluation.contains('-cv'):
             k = int(self.evaluation['-cv'])
-            #if k < 2 or k > 10: #limit to 2-10 fold cross validation
-                #print("k for cross-validation should not be greater than 10 or less than 2")
-                #exit(-1)
+            if k < 2 or k > 10: #limit to 2-10 fold cross validation
+                print("k for cross-validation should not be greater than 10 or less than 2")
+                exit(-1)
             mkl.set_num_threads(max(1,mkl.get_max_threads()//k))
             #create the manager for communication among multiple processes
             manager = Manager()

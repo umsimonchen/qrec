@@ -77,11 +77,12 @@ class Measure(object):
             IDCG = 0
             #1 = related, 0 = unrelated
             for n, item in enumerate(res[user]):
-                if item[0] in origin[user]:
-                    DCG+= 1.0/math.log(n+2)
+                if item[0] in origin[user]:#find the position of ground true such that DCG wont larger than IDCG
+                    DCG+= 1.0/math.log(n+2) #log0 is infinite, log1 is 0 cannot be denominator
             for n, item in enumerate(list(origin[user].keys())[:N]):
                 IDCG+=1.0/math.log(n+2)
             sum_NDCG += DCG / IDCG
+            #print(DCG / IDCG)
         return sum_NDCG / len(res)
     # @staticmethod
     # def AUC(origin, res, rawRes):

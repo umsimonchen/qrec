@@ -23,6 +23,7 @@ class BUIR(DeepRecommender):
 
     def _create_variable(self):
         self.sub_mat = {}
+        #online encoder
         self.sub_mat['adj_values_sub_o'] = tf.placeholder(tf.float32)
         self.sub_mat['adj_indices_sub_o'] = tf.placeholder(tf.int64)
         self.sub_mat['adj_shape_sub_o'] = tf.placeholder(tf.int64)
@@ -30,6 +31,8 @@ class BUIR(DeepRecommender):
             self.sub_mat['adj_indices_sub_o'],
             self.sub_mat['adj_values_sub_o'],
             self.sub_mat['adj_shape_sub_o'])
+        
+        #target encoder
         self.sub_mat['adj_values_sub_t'] = tf.placeholder(tf.float32)
         self.sub_mat['adj_indices_sub_t'] = tf.placeholder(tf.int64)
         self.sub_mat['adj_shape_sub_t'] = tf.placeholder(tf.int64)
@@ -75,6 +78,7 @@ class BUIR(DeepRecommender):
         return indices, coo.data, coo.shape
 
     def initModel(self):
+        #BUIR: neighbor
         super(BUIR, self).initModel()
         self._create_variable()
         initializer = tf.contrib.layers.xavier_initializer()
@@ -82,8 +86,12 @@ class BUIR(DeepRecommender):
         self.online_bias = tf.Variable(initializer([1, self.emb_size]))
         self.online_user_embeddings = tf.Variable(initializer(shape=[self.num_users, self.emb_size]), name='U')
         self.online_item_embeddings = tf.Variable(initializer(shape=[self.num_items, self.emb_size]), name='V')
+        #try to ensure the relationship (but noraml way as # seems works as well)
         self.target_user_embeddings = tf.Variable(self.online_user_embeddings.initialized_value(), name='t_U')
         self.target_item_embeddings = tf.Variable(self.online_item_embeddings.initialized_value(), name='t_V')
+        # self.target_user_embeddings = tf.Variable(initializer(shape=[self.num_users, self.emb_size]), name='t_U')
+        # self.target_item_embeddings = tf.Variable(initializer(shape=[self.num_items, self.emb_size]), name='t_V')
+        
         # initialize adjacency matrices
         online_embeddings = tf.concat([self.online_user_embeddings, self.online_item_embeddings], axis=0)
         target_embeddings = tf.concat([self.target_user_embeddings, self.target_item_embeddings], axis=0)
@@ -100,14 +108,17 @@ class BUIR(DeepRecommender):
             #norm_embeddings = tf.math.l2_normalize(target_embeddings, axis=1)
             all_target_embeddings += [target_embeddings]
         # averaging the view-specific embeddings
-        online_embeddings = tf.reduce_mean(all_online_embeddings, axis=0)
+        online_embeddings = tf.reduce_sum(all_online_embeddings, axis=0) #reduce_mean equivalent
         self.on_user_embeddings, self.on_item_embeddings = tf.split(online_embeddings, [self.num_users, self.num_items], 0)
+        
         #linear layer
         def linear(em):
-            return tf.nn.tanh(tf.matmul(em,self.online_mat)+self.online_bias)
+            #why not sigmoid
+            return tf.nn.relu(tf.matmul(em,self.online_mat)+self.online_bias)
+            #return tf.nn.tanh(tf.matmul(em,self.online_mat)+self.online_bias) # one-layer prediction 
         q_online_embeddings = linear(online_embeddings)
         self.q_user_embeddings, self.q_item_embeddings = tf.split(q_online_embeddings, [self.num_users, self.num_items], 0)
-        target_embeddings = tf.reduce_mean(all_target_embeddings, axis=0)
+        target_embeddings = tf.reduce_sum(all_target_embeddings, axis=0) #reduce_mean equivalent
         tar_user_embeddings, tar_item_embeddings = tf.split(target_embeddings, [self.num_users, self.num_items], 0)
         tar_user_embeddings = tf.stop_gradient(tar_user_embeddings)
         tar_item_embeddings = tf.stop_gradient(tar_item_embeddings)

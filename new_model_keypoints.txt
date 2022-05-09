@@ -1,0 +1,5 @@
+1. main.py: add the new model name
+2. add a .conf file in the Conf folder
+3. rename the key in .conf file
+4. rename the class name in the model.py
+5. rename the key in model.py to receive the parameter of the .conf

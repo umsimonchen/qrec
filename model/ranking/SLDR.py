@@ -181,20 +181,21 @@ class SLDR(SocialRecommender,GraphRecommender):
             print(tf.shape(scores))
             scores = scores / (tf.norm(scores,1))
             return scores
-            
-        dense_hp = tf.sparse_tensor_to_dense(H_p)
-        neighbors_pos = tf.nn.embedding_lookup(item_embeddings, self.pos_i)#m*d
-        neighbors_ego_hp = tf.concat([user_embeddings_c3[self.segment_u:self.segment_u+100], neighbors_pos[self.segment_u:self.segment_u+100]], axis=1)#m*(m+d+d)
-        neighbor_weight = tf.vectorized_map(fn=lambda em: loop_user(em),elems=neighbors_ego_hp)
-        #print(neighbor_weight, dense_hp[:100])
-        new_hp = tf.multiply(neighbor_weight, dense_hp[self.segment_u:self.segment_u+100])
-        dense_hp = tf.concat([dense_hp[:self.segment_u],new_hp,dense_hp[self.segment_u+100:]], axis=0)
-        dense_hp = dense_hp / tf.reshape(tf.reduce_sum(dense_hp, axis=1), (-1, 1))
-        arr_idx = tf.where(tf.not_equal(dense_hp, 0))
-        H_p = tf.SparseTensor(arr_idx, tf.gather_nd(dense_hp, arr_idx), [self.num_users, self.num_users])
-        self.neighbors_weight = neighbor_weight
-        self.neighbors = dense_hp
         
+        def consis(H, user_emb):
+            dense_h = tf.sparse_tensor_to_dense(H)
+            neighbors_pos = tf.nn.embedding_lookup(item_embeddings, self.pos_i)#m*d
+            neighbors_ego_h = tf.concat([user_emb[self.segment_u:self.segment_u+100], neighbors_pos[self.segment_u:self.segment_u+100]], axis=1)#m*(m+d+d)
+            neighbor_weight = tf.vectorized_map(fn=lambda em: loop_user(em),elems=neighbors_ego_h)
+            new_h = tf.multiply(neighbor_weight, dense_h[self.segment_u:self.segment_u+100])
+            dense_h = tf.concat([dense_h[:self.segment_u],new_h,dense_h[self.segment_u+100:]], axis=0)
+            dense_h = dense_h / tf.reshape(tf.reduce_sum(dense_h, axis=1), (-1, 1))
+            arr_idx = tf.where(tf.not_equal(dense_h, 0))
+            H_new = tf.SparseTensor(arr_idx, tf.gather_nd(dense_h, arr_idx), [self.num_users, self.num_users])
+            self.neighbors_weight = neighbor_weight
+            self.neighbors = dense_h
+            return H_new
+            
         self.ss_loss_u = 0 #self-supervised loss
         #multi-channel convolution
         for k in range(self.n_layers):
@@ -208,6 +209,7 @@ class SLDR(SocialRecommender,GraphRecommender):
             norm_embeddings = tf.math.l2_normalize(user_embeddings_c2, axis=1)
             all_embeddings_c2 += [norm_embeddings]
             #Channel P
+            H_p = consis(H_p, user_embeddings_c3)
             user_embeddings_c3 = tf.sparse_tensor_dense_matmul(H_p, user_embeddings_c3)
             norm_embeddings = tf.math.l2_normalize(user_embeddings_c3, axis=1)
             all_embeddings_c3 += [norm_embeddings]
