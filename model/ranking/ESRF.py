@@ -12,9 +12,9 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 def gumbel_softmax(logits, temperature=0.2):
     eps = 1e-10
     u = tf.random_uniform(tf.shape(logits), minval=0, maxval=1) #k*m
-    gumbel_noise = -tf.log(-tf.log(u + eps) + eps)
-    y = tf.log(logits + eps) + gumbel_noise
-    return tf.nn.softmax(y / temperature)
+    gumbel_noise = -tf.log(-tf.log(u + eps) + eps) #k*m
+    y = tf.log(logits + eps) + gumbel_noise #k*m
+    return tf.nn.softmax(y / temperature) #k*m
 
 class ESRF(SocialRecommender,GraphRecommender):
     def __init__(self, conf, trainingSet=None, testSet=None, relation=None, fold='[1]'):
@@ -106,14 +106,14 @@ class ESRF(SocialRecommender,GraphRecommender):
         #user_embeddings = tf.nn.sigmoid(tf.matmul(tf.reduce_sum(all_embeddings, 0), projection_head))
         
         # construct concrete selector layer
-        self.g_weights['c_selector'] = tf.Variable(initializer([self.K,self.num_users]), name='c_selector')
+        self.g_weights['c_selector'] = tf.Variable(initializer([self.K,self.num_users]), name='c_selector') #k*m
         #to avoid oom, each time we just generate alternative negibhborhood for 100 users
         user_features = tf.matmul(user_embeddings[self.userSegment:self.userSegment+100],user_embeddings,transpose_b=True) #100*d d*m = 100*m
         def getAlternativeNeighborhood(embedding): #embedding: 1*m
             alphaEmbeddings = tf.multiply(embedding, self.g_weights['c_selector']) #multiply broadcasting: k*m
             multi_hot_vector = tf.reduce_sum(self.sampling(alphaEmbeddings), 0) #1*m
             return multi_hot_vector
-        self.alternativeNeighborhood = tf.vectorized_map(fn=lambda em:getAlternativeNeighborhood(em),elems=user_features)
+        self.alternativeNeighborhood = tf.vectorized_map(fn=lambda em:getAlternativeNeighborhood(em),elems=user_features) #100*m
         paddings = tf.zeros(shape=(self.num_users,self.num_users))
         self.alternativeNeighborhood = tf.concat([paddings[:self.userSegment],self.alternativeNeighborhood,paddings[self.userSegment+100:]],0) # only dense on segment, while others 0
         #decoder

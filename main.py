@@ -26,7 +26,7 @@ if __name__ == '__main__':
 
     print('GNNs-based Recommenders:')
     print('g1. NGCF          g2. LightGCN        g3. ESRF        g4. DHCF            g5. DiffNet')
-    print('g6. DiffNet++     g7. ConsisRec       g8. ConsisRecplus' )
+    print('g6. DiffNet++     g7. ConsisRec       g8. ConsisRecplus      g9. EDCM' )
     
     print('Self-Supervised Recommenders:')
     print('q1. SGL           q2. SEPT            q3. BUIR        q4. MHCN            q5. GACL')
@@ -46,7 +46,7 @@ if __name__ == '__main__':
                  's7':'LOCABAL','s8':'SocialFD','s9':'TBPR','s10':'SEREC','a1':'CoFactor',
                  'a2':'CUNE_MF','a3':'CUNE_BPR','a4':'IF_BPR',
                  'd1':'APR','d2':'CDAE','d3':'DMF','d4':'NeuMF','d5':'CFGAN','d6':'IRGAN','d7':'RSGAN',
-                 'g1':'NGCF', 'g2':'LightGCN', 'g3':'ESRF', 'g4':'DHCF', 'g5':'DiffNet','g6':'DiffNetplus','g7':'ConsisRec','g8':'ConsisRecplus',
+                 'g1':'NGCF', 'g2':'LightGCN', 'g3':'ESRF', 'g4':'DHCF', 'g5':'DiffNet','g6':'DiffNetplus','g7':'ConsisRec','g8':'ConsisRecplus', 'g9':'EDCM',
                  'q1':'SGL', 'q2':'SEPT', 'q3':'BUIR', 'q4':'MHCN', 'q5':'GACL', 'q6':'SLDR',
                  'b1':'UserMean','b2':'ItemMean','b3':'MostPopular','b4':'Rand'}
     try:

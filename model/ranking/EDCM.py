@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu May  5 15:32:06 2022
+Created on Tue May 10 16:48:11 2022
 
 @author: simon
 """
@@ -18,16 +18,17 @@ from util import config
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 tf.reset_default_graph()
 
-class ConsisRecplus(SocialRecommender,GraphRecommender):
+class EDCM(SocialRecommender,GraphRecommender):
     def __init__(self, conf, trainingSet=None, testSet=None, relation=None, fold='[1]'):
         GraphRecommender.__init__(self, conf=conf, trainingSet=trainingSet, testSet=testSet, fold=fold)
         SocialRecommender.__init__(self, conf=conf, trainingSet=trainingSet, testSet=testSet, relation=relation,fold=fold)
 
     def readConfiguration(self):
-        super(ConsisRecplus, self).readConfiguration()
-        args = config.OptionConf(self.config['ConsisRecplus'])
+        super(EDCM, self).readConfiguration()
+        args = config.OptionConf(self.config['EDCM'])
         self.n_layers = int(args['-n_layer'])
         self.neighbor_percent = float(args['-neighbor_percent'])
+        self.temperature = float(args['-temperature'])
     
     def buildSparseRelationMatrix(self):
         row, col, entries = [], [], []
@@ -39,7 +40,7 @@ class ConsisRecplus(SocialRecommender,GraphRecommender):
         return AdjacencyMatrix
     
     def initModel(self):
-        super(ConsisRecplus, self).initModel()
+        super(EDCM, self).initModel()
         S = self.buildSparseRelationMatrix()
         indices = np.mat([S.row, S.col]).transpose()
         self.S = tf.SparseTensor(indices, S.data.astype(np.float32), S.shape) #social: m*m
@@ -55,11 +56,21 @@ class ConsisRecplus(SocialRecommender,GraphRecommender):
             u += 1
         return i_i
     
+    def sampling(self, a):
+        eps = 1e-10
+        a = tf.nn.softmax(a)
+        u = tf.random_uniform(tf.shape(a))
+        gumbel_noise = -tf.log(-tf.log(u+eps)+eps)
+        y = tf.log(a+eps) + gumbel_noise
+        return tf.nn.softmax(y / self.temperature)
+        
     def trainModel(self):
         self.positive_i = tf.placeholder(tf.int32, shape=[None])
         self.segment_u = tf.placeholder(tf.int32)
         self.weights = {}
         initializer = tf.contrib.layers.xavier_initializer()
+        
+        #Consistency of known friends
         self.weights['query'] = tf.Variable(initializer([2 * self.emb_size, self.emb_size]), name='query')
         for k in range(self.n_layers):
             self.weights['weights%d' % k ] = tf.Variable(initializer([2 * self.emb_size, self.emb_size]), name='weights%d' % k)
@@ -102,6 +113,16 @@ class ConsisRecplus(SocialRecommender,GraphRecommender):
             all_user_embeddings.append(new_user_embeddings)
         
         user_embeddings = tf.reduce_sum(all_user_embeddings, axis=0)
+        
+        #Find implicit friends
+        self.weights['selectors'] = tf.Variable(initializer([self.K, self.num_users]), name='selectors') #k*m
+        user_similarities = tf.matmul(user_embeddings[self.segment_u:self.segment_u+100],user_embeddings, transpose_b=True)
+        def findNeighbors(user_similarity):
+            alpha = tf.multiply(user_similarity, self.weights['selectors'])
+            multi_hot = tf.reduce_sum(self.sampling(alpha), 0)
+            return multi_hot
+        self.new_neighbors = tf.vectorized_map(fn=lambda em:findNeighbors(em), elems=user_similarities)
+                
         #Prediction
         self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
         self.neg_item_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.neg_idx)
