@@ -57,6 +57,13 @@ class EDCM(SocialRecommender,GraphRecommender):
             u += 1
         return i_i
     
+    def positvie_sample_all(self):
+        i_i = []
+        for i in list(self.data.trainSet_u.keys()):
+            positive = list(self.data.trainSet_u[i].keys())
+            i_i.append(self.data.item[choice(positive)])
+        return i_i
+    
     def sampling(self, a):
         eps = 1e-10
         a = tf.nn.softmax(a) #k*m
@@ -73,7 +80,6 @@ class EDCM(SocialRecommender,GraphRecommender):
         
         #Consistency of known friends
         self.weights['query'] = tf.Variable(initializer([2 * self.emb_size, self.emb_size]), name='query')
-        self.weights['query_h'] = tf.Variable(initializer([2 * self.emb_size, self.emb_size]), name='query_h')
         for k in range(self.n_layers):
             self.weights['weights%d' % k ] = tf.Variable(initializer([2 * self.emb_size, self.emb_size]), name='weights%d' % k)
         
@@ -116,6 +122,7 @@ class EDCM(SocialRecommender,GraphRecommender):
             all_user_embeddings.append(new_user_embeddings)
             
         user_embeddings = tf.reduce_sum(all_user_embeddings, axis=0)
+        item_embeddings = self.item_embeddings
         
         #Find implicit friends
         self.weights['selectors'] = tf.Variable(initializer([self.K, self.num_users]), name='selectors') #k*m
@@ -126,79 +133,115 @@ class EDCM(SocialRecommender,GraphRecommender):
             multi_hot = tf.reduce_sum(self.sampling(alpha), 0) #m
             return multi_hot
         alternative = tf.vectorized_map(fn=lambda em:findNeighbors(em), elems=user_similarities) #100*m
-        new_neighbors = tf.identity(alternative)
-        alternative = tf.sort(alternative, axis=1, direction='DESCENDING')
-        minimum = tf.reshape(alternative[:,self.K-1], [tf.math.minimum(self.num_users-self.segment_u, 100), 1]) #100*1
-        new_neighbors = tf.cast((new_neighbors - minimum) >= 0, tf.float32)
-        self.A = tf.concat([self.S[:self.segment_u], new_neighbors, self.S[self.segment_u+100:]], axis=0)
-        
-        def query_h(n_ego):
-            ego, u_embedding = tf.split(tf.reshape(n_ego, [1, 3 * self.emb_size]), [2* self.emb_size, self.emb_size], axis=1)
-            q = tf.nn.relu(tf.matmul(ego, self.weights['query_h']))
-            score = tf.math.square(tf.norm(q-u_embedding, axis=1))
-            score = tf.math.exp(-score)
-            return score[0]
-        
-        def loop_user_h(u_ego):
-            ego = tf.reshape(u_ego, [1, 2 * self.emb_size])
-            neighbors_ego = tf.concat([tf.tile(ego, [self.num_users, 1]), all_user_embeddings_hidden[k]], axis=1)
-            scores = tf.vectorized_map(fn=lambda em: query_h(em), elems=neighbors_ego)
-            scores = tf.math.divide_no_nan(scores, tf.norm(scores, 1))
-            return scores
-        
-        def agg_h(weights):
-            weight = tf.reshape(weights, [1, self.num_users])
-            h_neighbor = tf.multiply(weight, tf.transpose(all_user_embeddings_hidden[k])) #d*m
-            h_neighbor = tf.reduce_sum(h_neighbor, axis=1) #d
-            return tf.transpose(h_neighbor)
-        
-        all_user_embeddings_hidden = [tf.identity(self.user_embeddings)]
-        weight_whole_h = tf.zeros([self.num_users, self.num_users], tf.float32)
+        paddings = tf.zeros(shape=(self.num_users,self.num_users))
+        alternative = tf.concat([paddings[:self.segment_u],alternative,paddings[self.segment_u+100:]],0) # only dense on segment, while others 0
+        # new_neighbors = tf.identity(alternative)
+        # alternative = tf.sort(alternative, axis=1, direction='DESCENDING')
+        # minimum = tf.reshape(alternative[:,self.K-1], [tf.math.minimum(self.num_users-self.segment_u, 100), 1]) #100*1
+        # new_neighbors = tf.cast((new_neighbors - minimum) >= 0, tf.float32)
+        # self.A = tf.concat([self.S[:self.segment_u], new_neighbors, self.S[self.segment_u+100:]], axis=0)
+        vals, indexes = tf.nn.top_k(alternative, self.K) #get the top-k largest value at every row
         for k in range(self.n_layers):
-            neighbors_weight_h = tf.vectorized_map(fn=lambda em:loop_user_h(em), elems=users_ego) #100*m
-            weight_whole_h = tf.concat([weight_whole_h[:self.segment_u], neighbors_weight_h, weight_whole_h[self.segment_u+100:]], axis=0) #m*m
-            neighbors_weight_h = self.A.__mul__(weight_whole_h)[self.segment_u:self.segment_u+100]
-            neighbors_weight_h = tf.multiply(neighbors_weight_h, neighbors_mask) #100*m
-            neighbors_weight_h = tf.math.divide_no_nan(neighbors_weight_h, tf.norm(neighbors_weight_h, 1)) #100*m
-            h = tf.vectorized_map(fn=lambda em: agg_h(em), elems=neighbors_weight_h) #100*d
-            h_ego = tf.concat([all_user_embeddings_hidden[k][self.segment_u:self.segment_u+100], h], axis=1) #100*2d
-            new_user_embeddings = tf.nn.relu(tf.matmul(h_ego, self.weights['weights%d' % k])) #100*d
-            new_user_embeddings = tf.concat([all_user_embeddings_hidden[k][:self.segment_u], new_user_embeddings, all_user_embeddings_hidden[k][self.segment_u+100:]], axis=0)
-            all_user_embeddings_hidden.append(new_user_embeddings)
+            self.weights['attention_m1%d' % k] = tf.Variable(
+                initializer([self.emb_size, self.emb_size]), name='attention_m1%d' % k)
+            self.weights['attention_m2%d' % k] = tf.Variable(
+                initializer([self.emb_size, self.emb_size]), name='attention_m2%d' % k)
+            self.weights['attention_v%d' % k] = tf.Variable(
+                initializer([1, self.emb_size * 2]), name='attention_v1%d' % k)
+        ego_embeddings = tf.concat([user_embeddings, self.item_embeddings], axis=0) #(m+n)*d
+        norm_adj = self.create_joint_sparse_adj_tensor() #heterogeneous network norm
+        all_multi_embeddings = []
+        for k in range(self.n_layers):
+            new_embeddings = tf.sparse_tensor_dense_matmul(norm_adj, ego_embeddings) #GCN in user-item pair
+
+            #social attention (applying attention may be a little time-consuming)
+            selectedItemEmbeddings = tf.gather(ego_embeddings[self.num_users:],self.positvie_sample_all()) #m*d
+            indexes = tf.cast(indexes,tf.float32)
+            userEmbeddings = tf.matmul(ego_embeddings[:self.num_users],self.weights['attention_m1%d' % k]) #m*d
+            itemEmbeddings = tf.matmul(selectedItemEmbeddings, self.weights['attention_m2%d' % k]) #m*d
+            attentionEmbeddings = tf.concat([indexes,userEmbeddings],axis=1) #m*(k+d)
+            attentionEmbeddings = tf.concat([attentionEmbeddings, itemEmbeddings], axis=1) #size=m*(k+d+d)
+            
+            def attention(embedding):
+                alternativeNeighors,u_embedding,i_embedding = tf.split(tf.reshape(embedding,[1,self.K+2*self.emb_size]),[self.K,self.emb_size,self.emb_size],axis=1)
+                #self.alternativeNeighors = alternativeNeighors[0]
+                alternativeNeighors = tf.cast(alternativeNeighors[0],tf.int32) #alternativaNeighbors:(1,k); alternativaNeighbors[0]:(k,) 
+                friendsEmbedding = tf.gather(ego_embeddings[:self.num_users],alternativeNeighors) #k*d
+                friendsEmbedding = tf.matmul(friendsEmbedding,self.weights['attention_m1%d' % k]) #k*d
+                i_embedding = tf.reshape(tf.concat([i_embedding] * self.K, 1), [self.K, self.emb_size])
+                #friendsEmbedding: k*d; u_embedding: 1*d - broadcasting
+                #1*2d k*2d - broadcasting --reduce_sum--> k
+                res = tf.reduce_sum(tf.multiply(self.weights['attention_v%d' % k],tf.sigmoid(tf.concat([friendsEmbedding+u_embedding, i_embedding],1))), 1)
+                weights = tf.nn.softmax(res) #k
+                socialEmbedding = tf.matmul(tf.reshape(weights,[1,self.K]),tf.gather(ego_embeddings[:self.num_users],alternativeNeighors))#1*k k*d = 1*d
+                return socialEmbedding[0] #1*d -> d
+            attentive_socialEmbeddings = tf.vectorized_map(fn=lambda em: attention(em),elems=attentionEmbeddings) #get 1 element(row) of attentinonEmbedding
+            all_multi_embeddings.append(tf.math.l2_normalize(attentive_socialEmbeddings, axis=1))
+            multi_embeddings = tf.reduce_sum(all_multi_embeddings, axis=0)
+            #self.multi_user_embeddings, self.multi_item_embeddings = tf.split(multi_embeddings,[self.num_users, self.num_items], 0)
+            
+            user_embeddings_h = (user_embeddings + multi_embeddings)/2
+            #item_embeddings += self.multi_item_embeddings
+        # all_user_embeddings_hidden = [tf.identity(self.user_embeddings)]
+        # for k in range(self.n_layers):
+        #     user_embeddings_hidden = tf.matmul(self.A, all_user_embeddings_hidden[k])
+        #     user_embeddings_hidden = tf.math.l2_normalize(user_embeddings_hidden, axis=1)
+        #     all_user_embeddings_hidden.append(user_embeddings_hidden)
         
-        hidden_user_embeddings = tf.reduce_sum(all_user_embeddings_hidden, axis=0)   
+        # hidden_user_embeddings = tf.reduce_sum(all_user_embeddings_hidden, axis=0)   
         
         #Attention
-        self.weights['attention'] = tf.Variable(initializer([1, self.emb_size]), name='at') #inter attention
-        self.weights['attention_mat'] = tf.Variable(initializer([self.emb_size, self.emb_size]), name='atm') #intra attention
-        weights = []
-        weights.append(tf.reduce_sum(tf.multiply(self.weights['attention'], tf.matmul(user_embeddings, self.weights['attention_mat'])),1)) 
-        weights.append(tf.reduce_sum(tf.multiply(self.weights['attention'], tf.matmul(hidden_user_embeddings, self.weights['attention_mat'])),1)) 
-        score = tf.nn.softmax(tf.transpose(weights)) 
-        mixed_embeddings = tf.transpose(tf.multiply(tf.transpose(score)[0], tf.transpose(user_embeddings)) + tf.multiply(tf.transpose(score)[1], tf.transpose(hidden_user_embeddings))) 
+        # self.weights['attention'] = tf.Variable(initializer([1, self.emb_size]), name='at') #inter attention
+        # self.weights['attention_mat'] = tf.Variable(initializer([self.emb_size, self.emb_size]), name='atm') #intra attention
+        # weights = []
+        # weights.append(tf.reduce_sum(tf.multiply(self.weights['attention'], tf.matmul(user_embeddings, self.weights['attention_mat'])),1)) 
+        # weights.append(tf.reduce_sum(tf.multiply(self.weights['attention'], tf.matmul(hidden_user_embeddings, self.weights['attention_mat'])),1)) 
+        # score = tf.nn.softmax(tf.transpose(weights)) 
+        # mixed_embeddings = tf.transpose(tf.multiply(tf.transpose(score)[0], tf.transpose(user_embeddings)) + tf.multiply(tf.transpose(score)[1], tf.transpose(hidden_user_embeddings))) 
+        
+        #mixed_embeddings = (user_embeddings + hidden_user_embeddings)/2
         
         #Prediction
         self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
-        self.neg_item_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.neg_idx)
-        self.u_embedding = tf.nn.embedding_lookup(mixed_embeddings, self.u_idx)
-        self.v_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.v_idx)
-        self.test = tf.reduce_sum(tf.multiply(self.u_embedding, self.item_embeddings), 1)
+        self.neg_item_embedding = tf.nn.embedding_lookup(item_embeddings, self.neg_idx)
+        self.u_embedding = tf.nn.embedding_lookup(user_embeddings, self.u_idx)
+        self.uh_embedding = tf.nn.embedding_lookup(user_embeddings_h, self.u_idx)
+        self.v_embedding = tf.nn.embedding_lookup(item_embeddings, self.v_idx)
+        #self.test = tf.reduce_sum(tf.multiply(self.u_embedding, self.item_embeddings), 1)
 
         y = tf.reduce_sum(tf.multiply(self.u_embedding, self.v_embedding), 1) \
             - tf.reduce_sum(tf.multiply(self.u_embedding, self.neg_item_embedding), 1)
+            
+        y_h = tf.reduce_sum(tf.multiply(self.uh_embedding, self.v_embedding), 1) \
+            - tf.reduce_sum(tf.multiply(self.uh_embedding, self.neg_item_embedding), 1)
+            
         loss = -tf.reduce_sum(tf.log(tf.sigmoid(y))) + self.regU * (
                     tf.nn.l2_loss(self.u_embedding) + tf.nn.l2_loss(self.v_embedding) +
                     tf.nn.l2_loss(self.neg_item_embedding))
+        
+        loss_h = -tf.reduce_sum(tf.log(tf.sigmoid(y_h))) + self.regU * (
+                    tf.nn.l2_loss(self.uh_embedding) + tf.nn.l2_loss(self.v_embedding) +
+                    tf.nn.l2_loss(self.neg_item_embedding))
+        
         opt = tf.train.AdamOptimizer(self.lRate)
         train = opt.minimize(loss)
         init = tf.global_variables_initializer()
         self.sess.run(init)
-        for epoch in range(self.maxEpoch):
+        for epoch in range(self.maxEpoch // 2):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch
                 u_i = np.random.randint(0, self.num_users)
                 i_i = self.positive_sample(u_i)
-                _, l, self.U, self.V = self.sess.run([train, loss, user_embeddings, self.item_embeddings],
+                _, l, self.U, self.V = self.sess.run([train, loss, user_embeddings, item_embeddings],
+                                     feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.segment_u: u_i, self.positive_i: i_i})
+                print('training:', epoch + 1, 'batch', n, 'loss:', l)
+            self.ranking_performance(epoch)
+        for epoch in range(self.maxEpoch // 2):
+            for n, batch in enumerate(self.next_batch_pairwise()):
+                user_idx, i_idx, j_idx = batch
+                u_i = np.random.randint(0, self.num_users)
+                i_i = self.positive_sample(u_i)
+                _, l, self.U, self.V = self.sess.run([train, loss_h, user_embeddings, item_embeddings],
                                      feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.segment_u: u_i, self.positive_i: i_i})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
             self.ranking_performance(epoch)

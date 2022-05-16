@@ -155,7 +155,7 @@ class ESRF(SocialRecommender,GraphRecommender):
         
         # decode GCN
         ego_embeddings = tf.concat([self.user_embeddings, self.item_embeddings], axis=0) #(m+n)*d
-        norm_adj = self.create_joint_sparse_adj_tensor() #heterogeneous network norm
+        norm_adj = self.create_joint_sparse_adj_tensor() #heterogeneous network norm, from graph....py
         initializer = tf.contrib.layers.xavier_initializer()
         all_embeddings = [ego_embeddings]
         for k in range(self.n_layers_D):
