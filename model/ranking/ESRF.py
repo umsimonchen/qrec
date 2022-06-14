@@ -177,7 +177,6 @@ class ESRF(SocialRecommender,GraphRecommender):
             itemEmbeddings = tf.matmul(selectedItemEmbeddings, self.d_weights['attention_m2%d' % k]) #m*d
             attentionEmbeddings = tf.concat([indexes,userEmbeddings],axis=1) #m*(k+d)
             attentionEmbeddings = tf.concat([attentionEmbeddings, itemEmbeddings], axis=1) #size=m*(k+d+d)
-            print(tf.shape(attentionEmbeddings))
             
             def attention(embedding):
                 alternativeNeighors,u_embedding,i_embedding = tf.split(tf.reshape(embedding,[1,self.K+2*self.emb_size]),[self.K,self.emb_size,self.emb_size],axis=1)
@@ -191,10 +190,7 @@ class ESRF(SocialRecommender,GraphRecommender):
                 res = tf.reduce_sum(tf.multiply(self.d_weights['attention_v%d' % k],tf.sigmoid(tf.concat([friendsEmbedding+u_embedding, i_embedding],1))), 1)
                 weights = tf.nn.softmax(res) #k
                 socialEmbedding = tf.matmul(tf.reshape(weights,[1,self.K]),tf.gather(ego_embeddings[:self.num_users],alternativeNeighors))#1*k k*d = 1*d
-                print(tf.shape(socialEmbedding))
-                print(tf.shape(socialEmbedding[0]))
                 return socialEmbedding[0] #1*d -> d
-            #print(tf.size(attentionEmbeddings))
             attentive_socialEmbeddings = tf.vectorized_map(fn=lambda em: attention(em),elems=attentionEmbeddings) #get 1 element(row) of attentinonEmbedding
             
             nonattentive_socialEmbeddings = tf.matmul(self.alternativeNeighborhood, ego_embeddings[:self.num_users]) / self.K #(m*m x m*d)/k, in average take 1/k percent
@@ -301,20 +297,22 @@ class ESRF(SocialRecommender,GraphRecommender):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx= batch
                 u_i = np.random.randint(0, self.num_users)
-                self.sess.run([self.d_train,self.d_loss],
+                _, _, self.U, self.V = self.sess.run([self.d_train,self.d_loss,self.multi_user_embeddings, self.multi_item_embeddings],
                                      feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.userSegment:u_i,
                                                 self.isSocial:0,self.isAttentive:self.attentiveTraining,self.sampledItems:selectedItems})
             print(self.foldInfo, 'training:', epoch + 1, 'finished.')
+            self.ranking_performance(epoch)
         print('normal training with social relations...')
         for epoch in range(self.maxEpoch // 3):
             selectedItems = self.sampleItems()
             for n, batch in enumerate(self.next_batch_pairwise()):
                 u_i = np.random.randint(0, self.num_users)
                 user_idx, i_idx, j_idx = batch
-                self.sess.run([self.d_train, self.d_loss],
+                _, _, self.U, self.V = self.sess.run([self.d_train, self.d_loss,self.multi_user_embeddings, self.multi_item_embeddings],
                               feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.userSegment:u_i,
                                          self.isSocial: 1, self.isAttentive: self.attentiveTraining,  self.sampledItems: selectedItems})
             print(self.foldInfo, 'training:', self.maxEpoch//3 + epoch + 1, 'finished.')
+            self.ranking_performance(epoch+1*self.maxEpoch//3)
         #adversarial learning without attention
         print('adversarial training with social relations...')
         for epoch in range(self.maxEpoch // 3):
@@ -322,11 +320,12 @@ class ESRF(SocialRecommender,GraphRecommender):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 u_i = np.random.randint(0, self.num_users)
                 user_idx, i_idx, j_idx = batch
-                self.sess.run(self.minimax, feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx,self.userSegment:u_i,
+                self.sess.run([self.minimax], feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx,self.userSegment:u_i,
                                                        self.isSocial:1,self.isAttentive:self.attentiveTraining,self.sampledItems:selectedItems})
             u_i = np.random.randint(0, self.num_users)
             self.U, self.V = self.sess.run([self.multi_user_embeddings, self.multi_item_embeddings],
-                                           feed_dict={self.userSegment:u_i,self.isSocial: 0,self.isAttentive:0,self.sampledItems:selectedItems})
+                                            feed_dict={self.userSegment:u_i,self.isSocial: 0,self.isAttentive:0,self.sampledItems:selectedItems})
+            
             self.ranking_performance(epoch+2*self.maxEpoch//3)
         self.U, self.V = self.bestU, self.bestV
 
@@ -344,7 +343,6 @@ class ESRF(SocialRecommender,GraphRecommender):
         #                                               self.v_idx: [0], self.isSocial: 1,self.isAttentive:1,self.sampledItems:selectedItems})
         #     self.isConverged(epoch + 1+self.maxIter)
             #self.sess.run([self.r_train, self.r_loss])
-
 
     def saveModel(self):
         selectedItems = self.sampleItems()

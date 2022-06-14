@@ -102,52 +102,20 @@ class SLDR(SocialRecommender,GraphRecommender):
         self.weights = {}
         initializer = tf.contrib.layers.xavier_initializer()
         self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
-        #define learnable paramters
-        for i in range(self.n_layers):
-            self.weights['gating%d' % (i+1)] = tf.Variable(initializer([self.emb_size, self.emb_size]), name='g_W_%d_1' % (i + 1)) #d*d
-            self.weights['gating_bias%d' %(i+1)] = tf.Variable(initializer([1, self.emb_size]), name='g_W_b_%d_1' % (i + 1)) #d*1
-
-        #define inline functions
-        def self_gating(em,channel):
-            #broadcasting: m*d
-            return tf.multiply(em,tf.nn.sigmoid(tf.matmul(em,self.weights['gating%d' % channel])+self.weights['gating_bias%d' %channel])) 
-        def self_supervised_gating(em, channel):
-            return tf.multiply(em,tf.nn.sigmoid(tf.matmul(em, self.weights['sgating%d' % channel])+self.weights['sgating_bias%d' % channel]))
-        def channel_attention(*channel_embeddings, t):
-            weights = []
-            for embedding in channel_embeddings:
-                #m*d->m*1->3*m
-                weights.append(tf.reduce_sum(tf.multiply(self.weights['attention_'+t], tf.matmul(embedding, self.weights['attention_mat_'+t])),1)) 
-            #every user has a attention score for every channel, m*3; default softmax axis=-1(last dimension);
-            score = tf.nn.softmax(tf.transpose(weights)) 
-            mixed_embeddings = 0 #broadcasting
-            for i in range(len(weights)):
-                #1*m⊙d*m: broadcasting
-                mixed_embeddings += tf.transpose(tf.multiply(tf.transpose(score)[i], tf.transpose(channel_embeddings[i])))
-            return mixed_embeddings,score
-        #initialize adjacency matrices
-        H = M_matrices[0]
-        H = self.adj_to_sparse_tensor(H) #turn sparse matrix into tensor
-        R = self.buildJointAdjacency() #build heterogeneous graph
         
-        #self-gating
-        user_embeddings = self_gating(self.user_embeddings,1)
-        all_embeddings = [user_embeddings]
-            
-        self.ss_loss_u = 0 #self-supervised loss
-        #multi-channel convolution
+        ego_embeddings = tf.concat([self.user_embeddings, self.item_embeddings], axis=0) #(m+n)*d
+        norm_adj = self.create_joint_sparse_adj_tensor()
+        all_new_embeddings = []
         for k in range(self.n_layers):
-            #Channel S
-            user_embeddings = tf.sparse_tensor_dense_matmul(H,user_embeddings)
-            norm_embeddings = tf.math.l2_normalize(user_embeddings, axis=1) #normalize the user embedding in differet dimension of a user
-            all_embeddings += [norm_embeddings]
+            new_embeddings = tf.sparse_tensor_dense_matmul(norm_adj, ego_embeddings)
+            all_new_embeddings.append(new_embeddings)
         
-        self.final_user_embeddings = tf.reduce_sum(all_embeddings, axis=0)
-        
+        n_embeddings = tf.reduce_sum(all_new_embeddings, axis=0)
+        self.final_user_embeddings, self.final_item_embeddings = tf.split(n_embeddings, [self.num_users, self.num_items], axis=0)
         #embedding look-up
-        self.batch_neg_item_emb = tf.nn.embedding_lookup(self.item_embeddings, self.neg_idx)
+        self.batch_neg_item_emb = tf.nn.embedding_lookup(self.final_item_embeddings, self.neg_idx)
         self.batch_user_emb = tf.nn.embedding_lookup(self.final_user_embeddings, self.u_idx) #placeholder in deepRecommender.py
-        self.batch_pos_item_emb = tf.nn.embedding_lookup(self.item_embeddings, self.v_idx)
+        self.batch_pos_item_emb = tf.nn.embedding_lookup(self.final_item_embeddings, self.v_idx)
     
     def trainModel(self):
         # no super class
@@ -155,7 +123,7 @@ class SLDR(SocialRecommender,GraphRecommender):
         reg_loss = 0
         for key in self.weights:
             reg_loss += 0.001*tf.nn.l2_loss(self.weights[key])
-        reg_loss += self.regU * (tf.nn.l2_loss(self.user_embeddings) + tf.nn.l2_loss(self.item_embeddings))
+        reg_loss += self.regU * (tf.nn.l2_loss(self.final_user_embeddings) + tf.nn.l2_loss(self.item_embeddings))
         total_loss = rec_loss+reg_loss #+ self.ss_rate*self.ss_loss_u
         opt = tf.train.AdamOptimizer(self.lRate)
         train_op = opt.minimize(total_loss)

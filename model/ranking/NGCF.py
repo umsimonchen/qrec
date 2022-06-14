@@ -58,14 +58,16 @@ class NGCF(GraphRecommender):
         for epoch in range(self.maxEpoch):
             for n, batch in enumerate(self.next_batch_pairwise()):
                 user_idx, i_idx, j_idx = batch
-                _, l = self.sess.run([train, rec_loss],
+                _, l, self.U, self.V = self.sess.run([train, rec_loss, self.multi_user_embeddings, self.multi_item_embeddings],
                                 feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx,self.isTraining:1})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
-
+            self.ranking_performance(epoch)
+            
     def predictForRanking(self, u):
         'invoked to rank all the items for the user'
         if self.data.containsUser(u):
             u = self.data.getUserId(u)
-            return self.sess.run(self.test,feed_dict={self.u_idx:u,self.isTraining:0})
+            return self.V.dot(self.U[u])
+            #return self.sess.run(self.test,feed_dict={self.u_idx:u,self.isTraining:0})
         else:
             return [self.data.globalMean] * self.num_items

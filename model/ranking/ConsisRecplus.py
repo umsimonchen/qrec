@@ -38,13 +38,57 @@ class ConsisRecplus(SocialRecommender,GraphRecommender):
         AdjacencyMatrix = coo_matrix((entries, (row, col)), shape=(self.num_users,self.num_users),dtype=np.float32)
         return AdjacencyMatrix
     
+    def buildSparseRatingMatrix(self):
+        row, col, entries = [], [], []
+        for pair in self.data.trainingData:
+            # symmetric matrix
+            row += [self.data.user[pair[0]]]
+            col += [self.data.item[pair[1]]]
+            entries += [1]
+        ratingMatrix = coo_matrix((entries, (row, col)), shape=(self.num_users,self.num_items),dtype=np.float32)
+        return ratingMatrix
+    
+    def buildMotifInducedAdjacencyMatrix(self):
+        S = self.buildSparseRelationMatrix()
+        Y = self.buildSparseRatingMatrix()
+        self.userAdjacency = Y.tocsr()
+        self.itemAdjacency = Y.transpose().tocsr()
+        B = S.multiply(S.transpose())
+        U = S - B
+        C1 = (U.dot(U)).multiply(U.transpose())
+        A1 = C1 + C1.transpose()
+        C2 = (B.dot(U)).multiply(U.transpose()) + (U.dot(B)).multiply(U.transpose()) + (U.dot(U)).multiply(B)
+        A2 = C2 + C2.transpose()
+        C3 = (B.dot(B)).multiply(U) + (B.dot(U)).multiply(B) + (U.dot(B)).multiply(B)
+        A3 = C3 + C3.transpose()
+        A4 = (B.dot(B)).multiply(B)
+        C5 = (U.dot(U)).multiply(U) + (U.dot(U.transpose())).multiply(U) + (U.transpose().dot(U)).multiply(U)
+        A5 = C5 + C5.transpose()
+        A6 = (U.dot(B)).multiply(U) + (B.dot(U.transpose())).multiply(U.transpose()) + (U.transpose().dot(U)).multiply(B)
+        A7 = (U.transpose().dot(B)).multiply(U.transpose()) + (B.dot(U)).multiply(U) + (U.dot(U.transpose())).multiply(B)
+        self.A8 = (Y.dot(Y.transpose())).multiply(B)
+        A9 = (Y.dot(Y.transpose())).multiply(U)
+        A10  = Y.dot(Y.transpose())
+        for i in range(self.num_users):
+            A10[i,i]=0
+        #user pairs which share less than 5 common purchases are ignored
+        A10 = A10.multiply(A10>5)
+        #obtain the normalized high-order adjacency
+        A = S + A1 + A2 + A3 + A4 + A5 + A6 + A7 + self.A8 + A9 + A10
+        A = A.transpose().multiply(1.0/A.sum(axis=1).reshape(1, -1))
+        A = A.transpose()
+        return A
+    
     def initModel(self):
         super(ConsisRecplus, self).initModel()
-        S = self.buildSparseRelationMatrix()
+        #S = self.buildSparseRelationMatrix()
+        S = self.buildMotifInducedAdjacencyMatrix()
         indices = np.mat([S.row, S.col]).transpose()
         self.S = tf.SparseTensor(indices, S.data.astype(np.float32), S.shape) #social: m*m
         self.S =tf.sparse.to_dense(self.S)
-    
+        #print(dir(self.social))
+        #print(self.social.followees)
+        
     def positive_sample(self, u_i):
         i_i = []
         u = 0
@@ -85,7 +129,7 @@ class ConsisRecplus(SocialRecommender,GraphRecommender):
             return tf.transpose(h_neighbor)
             
         positive_item_embeddings = tf.nn.embedding_lookup(self.item_embeddings, self.positive_i)
-        users_ego = tf.concat([self.user_embeddings[self.segment_u:self.segment_u+100], positive_item_embeddings], axis=1) #100*2d
+        users_ego = tf.concat([self.user_embeddings[self.segment_u:self.segment_u+100], positive_item_embeddings], axis=1) #100*2d, maybe it can be calculated first??
         all_user_embeddings = [tf.identity(self.user_embeddings)]
         neighbors_mask = tf.cast(tf.random.uniform(shape=[tf.math.minimum(self.num_users-self.segment_u, 100), self.num_users], dtype=tf.float32)<self.neighbor_percent, tf.float32)
         for k in range(self.n_layers):
@@ -102,6 +146,7 @@ class ConsisRecplus(SocialRecommender,GraphRecommender):
             all_user_embeddings.append(new_user_embeddings)
         
         user_embeddings = tf.reduce_sum(all_user_embeddings, axis=0)
+        
         #Prediction
         self.neg_idx = tf.placeholder(tf.int32, name="neg_holder")
         self.neg_item_embedding = tf.nn.embedding_lookup(self.item_embeddings, self.neg_idx)
@@ -126,6 +171,7 @@ class ConsisRecplus(SocialRecommender,GraphRecommender):
                 _, l, self.U, self.V = self.sess.run([train, loss, user_embeddings, self.item_embeddings],
                                      feed_dict={self.u_idx: user_idx, self.neg_idx: j_idx, self.v_idx: i_idx, self.segment_u: u_i, self.positive_i: i_i})
                 print('training:', epoch + 1, 'batch', n, 'loss:', l)
+                #print(self.u)
             self.ranking_performance(epoch)
         self.U, self.V = self.bestU, self.bestV
         

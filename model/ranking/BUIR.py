@@ -89,12 +89,13 @@ class BUIR(DeepRecommender):
         #try to ensure the relationship (but noraml way as # seems works as well)
         self.target_user_embeddings = tf.Variable(self.online_user_embeddings.initialized_value(), name='t_U')
         self.target_item_embeddings = tf.Variable(self.online_item_embeddings.initialized_value(), name='t_V')
+        # but similarly: 
         # self.target_user_embeddings = tf.Variable(initializer(shape=[self.num_users, self.emb_size]), name='t_U')
         # self.target_item_embeddings = tf.Variable(initializer(shape=[self.num_items, self.emb_size]), name='t_V')
         
         # initialize adjacency matrices
-        online_embeddings = tf.concat([self.online_user_embeddings, self.online_item_embeddings], axis=0)
-        target_embeddings = tf.concat([self.target_user_embeddings, self.target_item_embeddings], axis=0)
+        online_embeddings = tf.concat([self.online_user_embeddings, self.online_item_embeddings], axis=0) #(m+n)*d
+        target_embeddings = tf.concat([self.target_user_embeddings, self.target_item_embeddings], axis=0) #(m+n)*d
         all_online_embeddings = [online_embeddings]
         all_target_embeddings = [target_embeddings]
         #multi-view convolution: LightGCN structure
